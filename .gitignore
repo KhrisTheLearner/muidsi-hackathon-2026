@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+eggs/
+*.egg
+
+# Virtual environment
+venv/
+env/
+.venv/
+
+# Environment variables (NEVER commit API keys)
+.env
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# Data files (too large for git)
+data/raw/*.xlsx
+data/raw/*.csv
+data/raw/*.xls
+data/raw/*.zip
+data/processed/*.csv
+data/processed/*.pkl
+data/external/*
+!data/**/.gitkeep
+!data/**/README.md
+
+# Model artifacts
+*.pkl
+*.joblib
+*.h5
+*.pt
+*.pth
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Node (frontend)
+frontend/node_modules/
+frontend/build/
+frontend/.env
+
+# Logs
+*.log
