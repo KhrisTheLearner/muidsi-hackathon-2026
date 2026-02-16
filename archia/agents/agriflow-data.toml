@@ -1,0 +1,6 @@
+# AgriFlow Data Agent - fast data retrieval from external APIs
+name = "agriflow-data"
+model_name = "priv-claude-3-5-haiku-20241022"
+enabled = true
+description = "Fast data fetcher for USDA, Census, FEMA, and weather APIs"
+system_prompt_file = "agriflow-data.md"

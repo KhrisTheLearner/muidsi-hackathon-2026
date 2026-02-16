@@ -1,0 +1,6 @@
+# AgriFlow Logistics Agent - route optimization and delivery scheduling
+name = "agriflow-logistics"
+model_name = "priv-claude-3-5-haiku-20241022"
+enabled = true
+description = "Delivery route optimization and scheduling for Missouri food distribution"
+system_prompt_file = "agriflow-logistics.md"

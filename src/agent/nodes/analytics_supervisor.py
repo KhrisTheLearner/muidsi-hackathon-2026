@@ -1,0 +1,331 @@
+"""Analytics supervisor — coordinates 6 subagents for ML-driven analysis.
+
+This is a meta-tool registered with LangGraph's ToolNode. When the
+tool_caller routes a step tagged [analytics], it invokes
+`run_analytics_pipeline` which internally coordinates:
+
+  1. research_agent  — web search for emerging threats
+  2. data_agent      — build feature matrix from all data sources
+  3. ml_agent        — train model + predict risk
+  4. verify_agent    — compute CCC, RMSE, SHAP
+  5. viz_agent       — generate charts and maps
+  6. analysis_agent  — synthesize narrative
+
+Each subagent is a plain function (not an LLM call) that invokes the
+appropriate tools. This keeps token costs near zero for the coordination
+layer — only the final analysis step needs an LLM.
+"""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
+from langchain_core.tools import tool
+
+
+# ---------------------------------------------------------------------------
+# Subagent functions
+# ---------------------------------------------------------------------------
+
+def _research_subagent(state: str, query: str) -> dict[str, Any]:
+    """Subagent 1: Web research for emerging agricultural risks."""
+    from src.agent.tools.ml_engine import web_search_risks
+
+    results = web_search_risks.invoke({
+        "query": query or f"{state} agricultural risks food security 2026",
+        "region": state,
+    })
+    return {"web_research": results, "sources": ["DuckDuckGo web search"]}
+
+
+def _data_subagent(state: str) -> dict[str, Any]:
+    """Subagent 2: Build the feature matrix from all available data."""
+    from src.agent.tools.ml_engine import build_feature_matrix
+
+    features = build_feature_matrix.invoke({"state": state})
+    n_rows = len(features) if features and "error" not in features[0] else 0
+    n_cols = len(features[0]) if n_rows > 0 else 0
+
+    return {
+        "feature_matrix": features,
+        "n_counties": n_rows,
+        "n_features": n_cols,
+        "sources": ["USDA Food Environment Atlas", "USDA Food Access Atlas"],
+    }
+
+
+def _ml_subagent(
+    state: str,
+    model_type: str,
+    target_col: str,
+    scenario: str,
+    yield_reduction: float,
+    top_n: int,
+) -> dict[str, Any]:
+    """Subagent 3: Train model and run predictions."""
+    from src.agent.tools.ml_engine import predict_risk, train_risk_model
+
+    # Train
+    train_result = train_risk_model.invoke({
+        "state": state,
+        "model_type": model_type,
+        "target_col": target_col,
+    })
+
+    if "error" in train_result:
+        return {"error": train_result["error"], "predictions": [], "model_info": train_result}
+
+    # Predict
+    predictions = predict_risk.invoke({
+        "state": state,
+        "model_type": model_type,
+        "target_col": target_col,
+        "scenario": scenario,
+        "yield_reduction_pct": yield_reduction,
+        "top_n": top_n,
+    })
+
+    return {
+        "model_info": train_result,
+        "predictions": predictions,
+        "sources": [f"Trained {model_type} model on {train_result.get('n_samples', '?')} counties"],
+    }
+
+
+def _verify_subagent(
+    model_info: dict, state: str, model_type: str, target_col: str
+) -> dict[str, Any]:
+    """Subagent 4: Evaluate model with CCC, RMSE, and SHAP."""
+    from src.agent.tools.ml_engine import detect_anomalies, get_feature_importance
+
+    results: dict[str, Any] = {
+        "metrics": model_info.get("metrics", {}),
+        "cv_r2": model_info.get("cv_r2", "N/A"),
+    }
+
+    # Feature importance
+    importance = get_feature_importance.invoke({
+        "state": state,
+        "model_type": model_type,
+        "target_col": target_col,
+        "top_n": 10,
+    })
+    results["feature_importance"] = importance
+
+    # Anomaly detection
+    anomalies = detect_anomalies.invoke({
+        "state": state,
+        "contamination": 0.1,
+        "top_n": 5,
+    })
+    results["anomalies"] = anomalies
+
+    return results
+
+
+def _viz_subagent(predictions: list[dict], state: str) -> list[dict]:
+    """Subagent 5: Generate Plotly charts from predictions."""
+    from src.agent.tools.chart_generator import create_bar_chart, create_scatter_map
+
+    charts = []
+
+    # Bar chart of top risk counties
+    if predictions and "error" not in predictions[0]:
+        bar = create_bar_chart.invoke({
+            "title": f"Top At-Risk Counties — {state}",
+            "data_json": json.dumps(predictions[:15]),
+            "x_col": "county",
+            "y_col": "predicted_risk" if "predicted_risk" in predictions[0] else "risk_score",
+            "color_col": "",
+            "horizontal": True,
+        })
+        if isinstance(bar, dict) and "plotly_spec" in bar:
+            charts.append(bar)
+
+    # Scatter map (only if lat/lon available — skip if not)
+    # The chart tools handle missing columns gracefully
+
+    return charts
+
+
+def _analysis_subagent(
+    predictions: list[dict],
+    metrics: dict,
+    importance: dict,
+    anomalies: list,
+    web_research: list,
+    scenario: str,
+    state: str,
+) -> str:
+    """Subagent 6: Synthesize a narrative analysis from all results.
+
+    This is pure Python — no LLM call. The main synthesizer node will
+    reformat this with an LLM for final presentation.
+    """
+    lines = [f"## Analytics Report — {state} ({scenario} scenario)\n"]
+
+    # Model performance
+    if metrics:
+        lines.append("### Model Performance")
+        for k, v in metrics.items():
+            lines.append(f"- **{k.upper()}**: {v}")
+        lines.append("")
+
+    # Top predictions
+    if predictions and "error" not in predictions[0]:
+        lines.append("### Highest-Risk Counties")
+        for i, p in enumerate(predictions[:10], 1):
+            county = p.get("county", "Unknown")
+            score = p.get("predicted_risk", p.get("risk_score", "N/A"))
+            ci_lo = p.get("ci_lower", "")
+            ci_hi = p.get("ci_upper", "")
+            ci_str = f" (95% CI: {ci_lo}–{ci_hi})" if ci_lo and ci_hi else ""
+            lines.append(f"{i}. **{county}**: risk score {score}{ci_str}")
+        lines.append("")
+
+    # Feature importance
+    if isinstance(importance, dict) and "top_features" in importance:
+        lines.append("### Key Risk Drivers (SHAP)")
+        for feat in importance["top_features"][:5]:
+            lines.append(f"- {feat['feature']}: importance {feat['importance']:.3f}")
+        if importance.get("interpretation"):
+            lines.append(f"\n{importance['interpretation']}")
+        lines.append("")
+
+    # Anomalies
+    if anomalies and isinstance(anomalies, list) and anomalies and "error" not in anomalies[0]:
+        lines.append("### Anomalous Counties")
+        for a in anomalies[:5]:
+            county = a.get("county", "Unknown")
+            devs = ", ".join(f"{d['feature']} (z={d['z_score']})" for d in a.get("top_deviations", [])[:3])
+            lines.append(f"- **{county}**: {devs}")
+        lines.append("")
+
+    # Web research
+    if web_research and isinstance(web_research, list):
+        lines.append("### Emerging Threats (Web Research)")
+        for r in web_research[:5]:
+            if isinstance(r, dict) and r.get("title"):
+                url = f" — [{r.get('source', 'link')}]({r.get('url', '')})" if r.get("url") else ""
+                lines.append(f"- {r['title'][:120]}{url}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Main tool — registered with ToolNode
+# ---------------------------------------------------------------------------
+
+@tool
+def run_analytics_pipeline(
+    state: str = "MO",
+    scenario: str = "drought",
+    yield_reduction_pct: float = 20.0,
+    model_type: str = "xgboost",
+    target_col: str = "FOODINSEC_15_17",
+    top_n: int = 15,
+    search_query: str = "",
+    pipeline: str = "full_analysis",
+) -> dict[str, Any]:
+    """Run the full AgriFlow analytics pipeline with 6 coordinated subagents.
+
+    Orchestrates: web research → data preparation → ML training → prediction →
+    verification (CCC/SHAP) → visualization → narrative analysis.
+
+    This is the recommended tool for comprehensive risk assessments. For quick
+    predictions, use run_prediction or predict_risk directly.
+
+    Args:
+        state: Two-letter state code.
+        scenario: "baseline", "drought", or "price_shock".
+        yield_reduction_pct: Simulated crop yield drop percentage.
+        model_type: "xgboost" or "random_forest".
+        target_col: Variable to predict (default food insecurity rate).
+        top_n: Number of top-risk counties.
+        search_query: Custom web search query (auto-generated if empty).
+        pipeline: "full_analysis", "quick_predict", or "risk_scan".
+
+    Returns:
+        Dict with predictions, metrics, feature importance, anomalies,
+        charts, web research, analysis narrative, and data sources.
+    """
+    sources: list[str] = []
+    analytics_report: dict[str, Any] = {
+        "pipeline": pipeline,
+        "state": state,
+        "scenario": scenario,
+        "model_type": model_type,
+    }
+
+    # ── Step 1: Research (skip for quick_predict) ──────────────
+    if pipeline in ("full_analysis", "risk_scan"):
+        research = _research_subagent(state, search_query)
+        analytics_report["web_research"] = research.get("web_research", [])
+        sources.extend(research.get("sources", []))
+
+    # ── Step 2: Data ───────────────────────────────────────────
+    data = _data_subagent(state)
+    analytics_report["n_counties"] = data["n_counties"]
+    analytics_report["n_features"] = data["n_features"]
+    sources.extend(data.get("sources", []))
+
+    # ── Step 3: ML ─────────────────────────────────────────────
+    ml = _ml_subagent(state, model_type, target_col, scenario, yield_reduction_pct, top_n)
+    if "error" in ml:
+        analytics_report["error"] = ml["error"]
+        analytics_report["sources"] = sources
+        return analytics_report
+
+    analytics_report["predictions"] = ml["predictions"]
+    analytics_report["model_info"] = {
+        "type": model_type,
+        "metrics": ml["model_info"].get("metrics", {}),
+        "cv_r2": ml["model_info"].get("cv_r2", "N/A"),
+        "n_features": ml["model_info"].get("n_features", 0),
+        "model_path": ml["model_info"].get("model_path", ""),
+    }
+    sources.extend(ml.get("sources", []))
+
+    # ── Step 4: Verification ───────────────────────────────────
+    verify = _verify_subagent(ml["model_info"], state, model_type, target_col)
+    analytics_report["evaluation"] = verify.get("metrics", {})
+    analytics_report["feature_importance"] = verify.get("feature_importance", {})
+    analytics_report["anomalies"] = verify.get("anomalies", [])
+
+    # ── Step 5: Visualization (skip for quick_predict) ─────────
+    if pipeline in ("full_analysis", "risk_scan"):
+        charts = _viz_subagent(ml["predictions"], state)
+        analytics_report["charts"] = charts
+    else:
+        analytics_report["charts"] = []
+
+    # ── Step 6: Analysis ───────────────────────────────────────
+    narrative = _analysis_subagent(
+        predictions=ml["predictions"],
+        metrics=verify.get("metrics", {}),
+        importance=verify.get("feature_importance", {}),
+        anomalies=verify.get("anomalies", []),
+        web_research=analytics_report.get("web_research", []),
+        scenario=scenario,
+        state=state,
+    )
+    analytics_report["analysis_report"] = narrative
+    analytics_report["sources"] = sources
+    analytics_report["confidence"] = _assess_confidence(ml["model_info"])
+
+    return analytics_report
+
+
+def _assess_confidence(model_info: dict) -> str:
+    """Assess overall confidence level based on model metrics."""
+    metrics = model_info.get("metrics", {})
+    r2 = metrics.get("r2", 0)
+    ccc = metrics.get("ccc", 0)
+
+    if r2 > 0.85 and ccc > 0.8:
+        return "high"
+    elif r2 > 0.7 and ccc > 0.6:
+        return "medium"
+    return "low"
