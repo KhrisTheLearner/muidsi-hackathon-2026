@@ -1,0 +1,515 @@
+{
+  "name": "AgriFlow",
+  "version": "2.0.0",
+  "description": "Food supply chain intelligence agent with 32 tools across 6 specialized categories including ML analytics",
+  "agents": [
+    {
+      "name": "agriflow-planner",
+      "model": "priv-claude-3-5-haiku-20241022",
+      "role": "Query decomposition",
+      "description": "Decomposes user questions into categorized sub-tasks with [data], [sql], [ml], [analytics], [viz], [route] tags for multi-agent routing",
+      "mcp_tools": [],
+      "tools_bound": 0
+    },
+    {
+      "name": "AGRIFLOW_SYSTEM",
+      "model": "priv-claude-sonnet-4-5-20250929",
+      "role": "Primary analyst + SQL",
+      "description": "Complex analysis with server-side ODBC SQL access. Can manage other agents.",
+      "mcp_tools": ["odbc"],
+      "tools_bound": 2
+    },
+    {
+      "name": "agriflow-data",
+      "model": "priv-claude-3-5-haiku-20241022",
+      "role": "Data retrieval",
+      "description": "Fast data fetching from USDA, Census, FEMA, and weather APIs",
+      "mcp_tools": [],
+      "tools_bound": 7
+    },
+    {
+      "name": "agriflow-viz",
+      "model": "priv-claude-3-5-haiku-20241022",
+      "role": "Visualization",
+      "description": "Plotly chart and map generation with dark theme",
+      "mcp_tools": [],
+      "tools_bound": 4
+    },
+    {
+      "name": "agriflow-logistics",
+      "model": "priv-claude-3-5-haiku-20241022",
+      "role": "Route optimization",
+      "description": "Delivery route optimization and scheduling for Missouri food distribution",
+      "mcp_tools": [],
+      "tools_bound": 4
+    },
+    {
+      "name": "agriflow-analytics",
+      "model": "priv-claude-sonnet-4-5-20250929",
+      "role": "ML analytics supervisor",
+      "description": "XGBoost/Random Forest training, SHAP explainability, CCC validation, anomaly detection, web risk search, full analytics pipelines",
+      "mcp_tools": [],
+      "tools_bound": 13
+    },
+    {
+      "name": "agriflow-ml",
+      "model": "priv-claude-sonnet-4-5-20250929",
+      "role": "ML prediction (legacy)",
+      "description": "Legacy alias for agriflow-analytics. Routes to same prompt and model.",
+      "mcp_tools": [],
+      "tools_bound": 3
+    }
+  ],
+  "tools": {
+    "data": [
+      {
+        "name": "query_food_atlas",
+        "source": "src/agent/tools/food_atlas.py",
+        "api": "Local SQLite",
+        "description": "County-level food insecurity, SNAP participation, poverty rates from USDA Food Environment Atlas",
+        "params": ["state", "columns"]
+      },
+      {
+        "name": "query_food_access",
+        "source": "src/agent/tools/food_atlas.py",
+        "api": "Local SQLite",
+        "description": "Census-tract food desert classifications from USDA Food Access Research Atlas",
+        "params": ["state"]
+      },
+      {
+        "name": "query_nass",
+        "source": "src/agent/tools/nass_api.py",
+        "api": "USDA NASS Quick Stats API",
+        "description": "County-level crop production, yields, acreage, and livestock data",
+        "params": ["state", "commodity", "year", "stat_type"]
+      },
+      {
+        "name": "query_weather",
+        "source": "src/agent/tools/weather.py",
+        "api": "Open-Meteo (free, no key)",
+        "description": "7-day weather forecast by county name or lat/lon coordinates",
+        "params": ["location", "lat", "lon"]
+      },
+      {
+        "name": "query_fema_disasters",
+        "source": "src/agent/tools/fema_disasters.py",
+        "api": "FEMA OpenAPI (free, no key)",
+        "description": "Historical disaster declarations (floods, storms, droughts) by state and year",
+        "params": ["state", "disaster_type", "year_start", "limit"]
+      },
+      {
+        "name": "query_census_acs",
+        "source": "src/agent/tools/census_acs.py",
+        "api": "US Census ACS API (free, no key)",
+        "description": "County demographics, income, poverty rate, vehicle access, unemployment",
+        "params": ["state", "year", "county_fips"]
+      },
+      {
+        "name": "run_prediction",
+        "source": "src/agent/tools/prediction.py",
+        "api": "Local model (ML or heuristic)",
+        "description": "County risk scores — auto-selects trained XGBoost/RF model if available, falls back to heuristic",
+        "params": ["state", "scenario", "yield_reduction_pct", "top_n", "model_type"]
+      }
+    ],
+    "sql": [
+      {
+        "name": "list_tables",
+        "source": "src/agent/tools/sql_query.py",
+        "api": "Local SQLite",
+        "description": "Database schema discovery - table names, columns, row counts",
+        "params": []
+      },
+      {
+        "name": "run_sql_query",
+        "source": "src/agent/tools/sql_query.py",
+        "api": "Local SQLite",
+        "description": "Arbitrary read-only SQL (SELECT only, auto-LIMIT, max 500 rows)",
+        "params": ["query", "limit"]
+      }
+    ],
+    "ml": [
+      {
+        "name": "compute_evaluation_metrics",
+        "source": "src/agent/tools/evaluation.py",
+        "api": "Local compute",
+        "description": "RMSE, MAE, R-squared, CCC (regression) or accuracy, precision, recall, F1 (classification)",
+        "params": ["predictions_json", "actuals_json", "pred_col", "actual_col", "task_type"]
+      },
+      {
+        "name": "compare_scenarios",
+        "source": "src/agent/tools/evaluation.py",
+        "api": "Local compute",
+        "description": "Side-by-side comparison of multiple scenario outputs with mean/max/min/std",
+        "params": ["scenarios_json", "metric_col", "label_col"]
+      },
+      {
+        "name": "compute_ccc",
+        "source": "src/agent/tools/evaluation.py",
+        "api": "Local compute",
+        "description": "Concordance Correlation Coefficient — stricter than R², penalizes systematic bias",
+        "params": ["predictions_json", "actuals_json", "pred_col", "actual_col"]
+      },
+      {
+        "name": "explain_with_shap",
+        "source": "src/agent/tools/evaluation.py",
+        "api": "Local compute",
+        "description": "SHAP TreeExplainer for global + per-sample feature importance of trained models",
+        "params": ["model_path", "data_json", "feature_names_json", "top_n"]
+      }
+    ],
+    "analytics": [
+      {
+        "name": "build_feature_matrix",
+        "source": "src/agent/tools/ml_engine.py",
+        "api": "Local compute",
+        "description": "Merge food_environment + food_access + derived features into ML-ready DataFrame",
+        "params": ["state"]
+      },
+      {
+        "name": "train_risk_model",
+        "source": "src/agent/tools/ml_engine.py",
+        "api": "Local compute",
+        "description": "Train XGBoost or Random Forest risk model with 5-fold cross-validation",
+        "params": ["state", "model_type", "target_col", "test_size"]
+      },
+      {
+        "name": "predict_risk",
+        "source": "src/agent/tools/ml_engine.py",
+        "api": "Local compute",
+        "description": "Run trained model inference on counties with confidence intervals under scenarios",
+        "params": ["state", "model_type", "target_col", "scenario", "yield_reduction_pct", "top_n"]
+      },
+      {
+        "name": "train_crop_model",
+        "source": "src/agent/tools/ml_engine.py",
+        "api": "Local compute",
+        "description": "Train crop dependency model from county food environment data",
+        "params": ["state", "commodity", "model_type"]
+      },
+      {
+        "name": "predict_crop_yield",
+        "source": "src/agent/tools/ml_engine.py",
+        "api": "Local compute",
+        "description": "Predict crop yield impacts under drought/price_shock scenarios",
+        "params": ["state", "commodity", "yield_reduction_pct", "top_n"]
+      },
+      {
+        "name": "get_feature_importance",
+        "source": "src/agent/tools/ml_engine.py",
+        "api": "Local compute",
+        "description": "SHAP-based feature importance with human-readable interpretation",
+        "params": ["state", "model_type", "target_col", "top_n"]
+      },
+      {
+        "name": "detect_anomalies",
+        "source": "src/agent/tools/ml_engine.py",
+        "api": "Local compute",
+        "description": "Isolation Forest outlier detection for counties with unusual indicator patterns",
+        "params": ["state", "contamination", "top_n"]
+      },
+      {
+        "name": "web_search_risks",
+        "source": "src/agent/tools/ml_engine.py",
+        "api": "DuckDuckGo (free, no key)",
+        "description": "Search web for emerging agricultural threats (pests, diseases, weather alerts)",
+        "params": ["query", "region"]
+      },
+      {
+        "name": "run_analytics_pipeline",
+        "source": "src/agent/nodes/analytics_supervisor.py",
+        "api": "Local compute",
+        "description": "Full automated analytics pipeline: research → data → ML → verify → viz → analysis",
+        "params": ["state", "scenario", "yield_reduction_pct", "model_type", "target_col", "top_n", "search_query", "pipeline"]
+      }
+    ],
+    "viz": [
+      {
+        "name": "create_bar_chart",
+        "source": "src/agent/tools/chart_generator.py",
+        "output": "Plotly JSON",
+        "description": "Bar charts for rankings, comparisons, distributions",
+        "params": ["title", "data_json", "x_col", "y_col", "color_col", "horizontal"]
+      },
+      {
+        "name": "create_line_chart",
+        "source": "src/agent/tools/chart_generator.py",
+        "output": "Plotly JSON",
+        "description": "Line charts for time series and trends",
+        "params": ["title", "data_json", "x_col", "y_cols"]
+      },
+      {
+        "name": "create_scatter_map",
+        "source": "src/agent/tools/chart_generator.py",
+        "output": "Plotly JSON",
+        "description": "Geographic scatter maps (scattermapbox) for risk assessment and food desert overlays",
+        "params": ["title", "data_json", "lat_col", "lon_col", "size_col", "color_col", "text_col", "zoom"]
+      },
+      {
+        "name": "create_risk_heatmap",
+        "source": "src/agent/tools/chart_generator.py",
+        "output": "Plotly JSON",
+        "description": "Risk assessment heatmaps for county-vs-factor matrices",
+        "params": ["title", "data_json", "x_col", "y_col", "z_col"]
+      }
+    ],
+    "route": [
+      {
+        "name": "optimize_delivery_route",
+        "source": "src/agent/tools/route_optimizer.py",
+        "algorithm": "Nearest-neighbor TSP",
+        "description": "Compute optimized delivery path from origin through destinations (22 Missouri locations)",
+        "params": ["origin", "destinations", "custom_locations_json"]
+      },
+      {
+        "name": "calculate_distance",
+        "source": "src/agent/tools/route_optimizer.py",
+        "algorithm": "Haversine",
+        "description": "Point-to-point distance and drive time estimate (45 mph rural MO average)",
+        "params": ["location_a", "location_b"]
+      },
+      {
+        "name": "create_route_map",
+        "source": "src/agent/tools/route_optimizer.py",
+        "output": "Plotly JSON",
+        "description": "Interactive map with route lines and numbered stop markers",
+        "params": ["route_json"]
+      },
+      {
+        "name": "schedule_deliveries",
+        "source": "src/agent/tools/route_optimizer.py",
+        "output": "Schedule JSON",
+        "description": "Time-based delivery schedule with loading/unloading at each stop",
+        "params": ["route_json", "start_time", "loading_minutes", "unloading_minutes"]
+      }
+    ]
+  },
+  "mcp_servers": [
+    {
+      "name": "AgriFlow SQLite",
+      "config": "archia/tools/agriflow-sqlite.toml",
+      "transport": "stdio",
+      "tools": ["list_tables", "run_sql_query"]
+    },
+    {
+      "name": "AgriFlow Charts",
+      "config": "archia/tools/agriflow-charts.toml",
+      "transport": "stdio",
+      "tools": ["create_bar_chart", "create_line_chart", "create_scatter_map", "create_risk_heatmap"]
+    },
+    {
+      "name": "AgriFlow Routes",
+      "config": "archia/tools/agriflow-routes.toml",
+      "transport": "stdio",
+      "tools": ["optimize_delivery_route", "calculate_distance", "create_route_map", "schedule_deliveries"]
+    },
+    {
+      "name": "AgriFlow ML",
+      "config": "archia/tools/agriflow-ml.toml",
+      "transport": "stdio",
+      "tools": ["train_and_predict", "train_risk_model", "predict_risk", "explain_predictions", "detect_anomalies", "search_agricultural_risks", "build_features"]
+    }
+  ],
+  "archia_marketplace_tools": [
+    {
+      "identifier": "archia/odbc",
+      "url": "http://172.31.16.179/mcp",
+      "transport": "streaming_http",
+      "tools": ["list_tables", "describe_table", "get_schema", "execute_sql"],
+      "attached_to": ["AGRIFLOW_SYSTEM"]
+    }
+  ],
+  "data_sources": [
+    {"name": "USDA Food Environment Atlas", "type": "SQLite", "access": "Local"},
+    {"name": "USDA Food Access Research Atlas", "type": "SQLite", "access": "Local"},
+    {"name": "USDA NASS Quick Stats", "type": "REST API", "access": "API key (NASS_API_KEY)"},
+    {"name": "FEMA Disaster Declarations", "type": "REST API", "access": "Free, no key"},
+    {"name": "US Census ACS", "type": "REST API", "access": "Free, no key"},
+    {"name": "Open-Meteo Weather", "type": "REST API", "access": "Free, no key"},
+    {"name": "DuckDuckGo Search", "type": "REST API", "access": "Free, no key"},
+    {"name": "Archia ODBC", "type": "MCP (streaming_http)", "access": "Via Archia platform"}
+  ],
+  "skills": [
+    {
+      "name": "AgriFlow Query Planner",
+      "agent": "agriflow-planner",
+      "category": "planning",
+      "description": "Decompose complex food supply chain questions into categorized sub-tasks for multi-agent execution"
+    },
+    {
+      "name": "Food Insecurity Analysis",
+      "agent": "agriflow-data",
+      "category": "data",
+      "tools": ["query_food_atlas"],
+      "description": "County-level food insecurity rates, SNAP participation, poverty, and food access indicators"
+    },
+    {
+      "name": "Food Desert Mapping",
+      "agent": "agriflow-data",
+      "category": "data",
+      "tools": ["query_food_access"],
+      "description": "Census-tract food desert classifications, distance to supermarkets, low-access populations"
+    },
+    {
+      "name": "Crop Production Data",
+      "agent": "agriflow-data",
+      "category": "data",
+      "tools": ["query_nass"],
+      "description": "County-level crop yields, production volumes, acreage, and livestock statistics"
+    },
+    {
+      "name": "Weather Forecast",
+      "agent": "agriflow-data",
+      "category": "data",
+      "tools": ["query_weather"],
+      "description": "7-day weather forecasts for Missouri counties for agricultural and delivery assessment"
+    },
+    {
+      "name": "Disaster History",
+      "agent": "agriflow-data",
+      "category": "data",
+      "tools": ["query_fema_disasters"],
+      "description": "FEMA disaster declarations for historical floods, storms, droughts by state and year"
+    },
+    {
+      "name": "Census Demographics",
+      "agent": "agriflow-data",
+      "category": "data",
+      "tools": ["query_census_acs"],
+      "description": "County demographics, income, poverty rates, vehicle access, and unemployment"
+    },
+    {
+      "name": "Risk Prediction",
+      "agent": "agriflow-analytics",
+      "category": "ml",
+      "tools": ["run_prediction"],
+      "description": "Food insecurity risk predictions with ML or heuristic model under baseline, drought, or price shock scenarios"
+    },
+    {
+      "name": "Model Evaluation",
+      "agent": "agriflow-analytics",
+      "category": "ml",
+      "tools": ["compute_evaluation_metrics", "compute_ccc"],
+      "description": "RMSE, MAE, R-squared, CCC, accuracy, precision, recall, and F1 evaluation metrics"
+    },
+    {
+      "name": "Scenario Comparison",
+      "agent": "agriflow-analytics",
+      "category": "ml",
+      "tools": ["compare_scenarios"],
+      "description": "Compare multiple what-if scenarios side-by-side with statistical summaries"
+    },
+    {
+      "name": "Train Risk Model",
+      "agent": "agriflow-analytics",
+      "category": "analytics",
+      "tools": ["train_risk_model", "build_feature_matrix"],
+      "description": "Train XGBoost or Random Forest risk model with cross-validation on county data"
+    },
+    {
+      "name": "Predict Agricultural Risk",
+      "agent": "agriflow-analytics",
+      "category": "analytics",
+      "tools": ["predict_risk", "predict_crop_yield"],
+      "description": "Run trained model inference on counties with confidence intervals under scenarios"
+    },
+    {
+      "name": "Feature Analysis",
+      "agent": "agriflow-analytics",
+      "category": "analytics",
+      "tools": ["get_feature_importance", "explain_with_shap"],
+      "description": "SHAP-based feature importance explaining which factors drive risk predictions"
+    },
+    {
+      "name": "Anomaly Detection",
+      "agent": "agriflow-analytics",
+      "category": "analytics",
+      "tools": ["detect_anomalies"],
+      "description": "Isolation Forest outlier detection for counties with unusual indicator patterns"
+    },
+    {
+      "name": "Agricultural Threat Search",
+      "agent": "agriflow-analytics",
+      "category": "analytics",
+      "tools": ["web_search_risks"],
+      "description": "Web search for emerging agricultural risks including pests, diseases, and weather threats"
+    },
+    {
+      "name": "Full Analytics Pipeline",
+      "agent": "agriflow-analytics",
+      "category": "analytics",
+      "tools": ["run_analytics_pipeline"],
+      "description": "Complete automated ML pipeline: data → train → predict → validate → visualize → analyze"
+    },
+    {
+      "name": "Bar Chart",
+      "agent": "agriflow-viz",
+      "category": "viz",
+      "tools": ["create_bar_chart"],
+      "description": "Plotly bar charts for county rankings, metric comparisons, and distributions"
+    },
+    {
+      "name": "Line Chart",
+      "agent": "agriflow-viz",
+      "category": "viz",
+      "tools": ["create_line_chart"],
+      "description": "Plotly line charts for time series trends and multi-metric tracking"
+    },
+    {
+      "name": "Geographic Map",
+      "agent": "agriflow-viz",
+      "category": "viz",
+      "tools": ["create_scatter_map"],
+      "description": "Interactive Plotly scatter maps for food desert overlays and risk assessment"
+    },
+    {
+      "name": "Risk Heatmap",
+      "agent": "agriflow-viz",
+      "category": "viz",
+      "tools": ["create_risk_heatmap"],
+      "description": "Risk assessment heatmaps showing county-vs-factor vulnerability matrices"
+    },
+    {
+      "name": "Route Optimization",
+      "agent": "agriflow-logistics",
+      "category": "route",
+      "tools": ["optimize_delivery_route"],
+      "description": "Optimize food delivery routes across Missouri using nearest-neighbor TSP"
+    },
+    {
+      "name": "Distance Calculator",
+      "agent": "agriflow-logistics",
+      "category": "route",
+      "tools": ["calculate_distance"],
+      "description": "Straight-line distance and estimated drive time between two Missouri locations"
+    },
+    {
+      "name": "Route Map",
+      "agent": "agriflow-logistics",
+      "category": "route",
+      "tools": ["create_route_map"],
+      "description": "Interactive Plotly maps showing delivery routes with numbered stop markers"
+    },
+    {
+      "name": "Delivery Schedule",
+      "agent": "agriflow-logistics",
+      "category": "route",
+      "tools": ["schedule_deliveries"],
+      "description": "Time-based delivery schedules with loading/unloading windows"
+    },
+    {
+      "name": "Database Explorer",
+      "agent": "AGRIFLOW_SYSTEM",
+      "category": "sql",
+      "tools": ["list_tables"],
+      "description": "Discover AgriFlow database schema — tables, columns, and row counts"
+    },
+    {
+      "name": "Custom SQL Query",
+      "agent": "AGRIFLOW_SYSTEM",
+      "category": "sql",
+      "tools": ["run_sql_query"],
+      "description": "Execute read-only SQL queries against the AgriFlow database"
+    }
+  ]
+}

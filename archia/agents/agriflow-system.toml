@@ -1,0 +1,10 @@
+# AgriFlow System - primary analyst with ODBC access for ad-hoc SQL
+name = "AGRIFLOW_SYSTEM"
+model_name = "priv-claude-sonnet-4-5-20250929"
+enabled = true
+description = "Primary AgriFlow analyst with server-side ODBC SQL access"
+system_prompt_file = "agriflow-system.md"
+can_manage_agents = true
+
+[mcp_tools]
+odbc = ["list_tables", "describe_table", "get_schema", "execute_sql"]
