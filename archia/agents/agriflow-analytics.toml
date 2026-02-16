@@ -1,0 +1,6 @@
+# AgriFlow Analytics Agent - ML prediction, validation, and risk assessment
+name = "agriflow-analytics"
+model_name = "priv-claude-sonnet-4-5-20250929"
+enabled = true
+description = "Data analytics supervisor: XGBoost/Random Forest training, SHAP explainability, CCC validation, anomaly detection, web risk search, and full analytics pipelines"
+system_prompt_file = "agriflow-analytics.md"

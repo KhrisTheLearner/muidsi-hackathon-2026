@@ -1,0 +1,6 @@
+# AgriFlow Planner - decomposes user queries into categorized sub-tasks
+name = "agriflow-planner"
+model_name = "priv-claude-3-5-haiku-20241022"
+enabled = true
+description = "Query decomposition into categorized sub-tasks for multi-agent routing"
+system_prompt_file = "agriflow-planner.md"
