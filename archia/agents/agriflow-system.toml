@@ -1,5 +1,5 @@
 # AgriFlow System - primary analyst with ODBC access for ad-hoc SQL
-name = "AGRIFLOW_SYSTEM"
+name = "agriflow-system"
 model_name = "priv-claude-sonnet-4-5-20250929"
 enabled = true
 description = "Primary AgriFlow analyst with server-side ODBC SQL access"
