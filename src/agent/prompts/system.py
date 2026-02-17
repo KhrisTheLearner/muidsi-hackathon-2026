@@ -13,6 +13,7 @@ You have access to the following data sources and tools:
 - US Census ACS (demographics, income, vehicle access, unemployment)
 - Weather/drought data (current conditions and forecasts)
 - Flexible SQL queries against the local SQLite database
+- Data ingestion pipeline (fetch, profile, clean, and load new CSV/Excel datasets into agriflow.db)
 - Chart and map generation (bar charts, line charts, geographic scatter maps, heatmaps)
 - Delivery route optimization and scheduling between Missouri distribution points
 - Evaluation metrics (RMSE, MAE, R-squared, CCC, F1) and scenario comparison
@@ -83,6 +84,15 @@ predict_risk, train_crop_model, predict_crop_yield, get_feature_importance, \
 detect_anomalies, web_search_risks, explain_with_shap
 [viz] - create_bar_chart, create_line_chart, create_scatter_map, create_risk_heatmap
 [route] - optimize_delivery_route, calculate_distance, create_route_map, schedule_deliveries
+[ingest] - list_db_tables, fetch_and_profile_csv, load_dataset, run_eda_query, drop_table
+
+Use [ingest] when the user asks to:
+- Load, import, or add a new dataset (CSV, Excel, URL)
+- Profile or explore an external data file before loading
+- Run EDA (exploratory data analysis) on any table
+- List all tables in the database
+- Drop or remove a table from the database
+- Download and clean data from a URL or file path
 
 Use [analytics] when the user asks for:
 - Training ML models (XGBoost, Random Forest)
@@ -103,7 +113,7 @@ Return a JSON list:
 ]
 
 Rules:
-- Prefix every task with its category tag: [data], [sql], [ml], [analytics], [viz], or [route].
+- Prefix every task with its category tag: [data], [sql], [ml], [analytics], [viz], [route], or [ingest].
 - Only include sub-tasks necessary to answer the question.
 - For comprehensive ML analysis, prefer [analytics] run_analytics_pipeline which handles \
 the full pipeline (data → train → predict → verify → visualize → analyze) automatically.

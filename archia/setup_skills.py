@@ -359,6 +359,59 @@ SKILLS = [
             "Always run optimize_delivery_route first to get the route_json input."
         ),
     },
+    # ── Ingest (5 tools) ──────────────────────────────────────────────
+    {
+        "name": "List Database Tables",
+        "description": "List all tables in agriflow.db with row counts and column counts for exploration and schema discovery",
+        "agent": "agriflow-ingest",
+        "instructions": (
+            "Use `list_db_tables` to enumerate all tables currently in agriflow.db. "
+            "No parameters needed. Returns table name, row count, and column count for each table. "
+            "Run this first to understand what data is already loaded before fetching new datasets."
+        ),
+    },
+    {
+        "name": "Profile Dataset",
+        "description": "Fetch a CSV or Excel file from a URL or local path and return an EDA profile without loading it into the database",
+        "agent": "agriflow-ingest",
+        "instructions": (
+            "Use `fetch_and_profile_csv` to preview an external dataset before loading. "
+            "Parameters: url_or_path (URL or local file path to CSV or Excel), "
+            "state_filter (optional 2-letter state code to filter, default 'MO'), "
+            "sample_rows (rows to show in preview, default 5). "
+            "Returns shape, column names, dtypes, null counts, numeric summary stats, and a sample. "
+            "Use this to validate a dataset is suitable before calling load_dataset."
+        ),
+    },
+    {
+        "name": "Load Dataset",
+        "description": "Fetch, clean, and load a CSV or Excel dataset from a URL or file path into agriflow.db as a new table",
+        "agent": "agriflow-ingest",
+        "instructions": (
+            "Use `load_dataset` to ingest a new dataset into agriflow.db. "
+            "Parameters: url_or_path (URL or local file path), "
+            "table_name (destination table name, use convention {source}_{topic}_{year}), "
+            "state_filter (optional 2-letter state code, default None = load all states), "
+            "replace (whether to replace existing table, default False), "
+            "sentinel_value (value to treat as NULL, default -9999.0). "
+            "Automatically normalizes state name columns, strips 'County' suffix, "
+            "replaces sentinel values with NULL, and creates indexes on State, County, FIPS, Year. "
+            "Always profile with fetch_and_profile_csv first. Returns row count loaded and columns."
+        ),
+    },
+    {
+        "name": "Explore Table",
+        "description": "Run EDA queries on any table in agriflow.db — summary stats, missing value analysis, county samples, or state-filtered previews",
+        "agent": "agriflow-ingest",
+        "instructions": (
+            "Use `run_eda_query` to explore any table in agriflow.db. "
+            "Parameters: table (table name), state (2-letter code, default 'MO'), "
+            "query_type ('summary' for descriptive stats, 'missing' for null counts, "
+            "'sample' for data preview, 'counties' for county list). "
+            "Use after loading a new dataset to verify contents and understand its structure. "
+            "Useful for diagnosing data quality issues or planning downstream analysis."
+        ),
+    },
     # ── SQL / Database (2 tools) ──────────────────────────────────────
     {
         "name": "Database Explorer",

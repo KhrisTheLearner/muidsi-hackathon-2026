@@ -48,6 +48,10 @@ from src.agent.tools.ml_engine import (
 from src.agent.nodes.analytics_supervisor import run_analytics_pipeline
 from src.agent.tools.sql_query import list_tables, run_sql_query
 from src.agent.tools.weather import query_weather
+from src.agent.tools.ingest import (
+    list_db_tables, fetch_and_profile_csv, load_dataset,
+    run_eda_query, drop_table,
+)
 
 # ---------------------------------------------------------------------------
 # Specialized tool groups — each agent only sees what it needs
@@ -80,9 +84,15 @@ SQL_TOOLS = [
     list_tables, run_sql_query,
 ]
 
+INGEST_TOOLS = [
+    list_db_tables, fetch_and_profile_csv, load_dataset,
+    run_eda_query, drop_table,
+]
+
 # Full set (fallback for unclassified steps)
 ALL_TOOLS = (
     DATA_TOOLS + SQL_TOOLS + ML_TOOLS + ANALYTICS_TOOLS + VIZ_TOOLS + ROUTE_TOOLS
+    + INGEST_TOOLS
 )
 # Deduplicate (some tools appear in multiple groups)
 ALL_TOOLS = list({t.name: t for t in ALL_TOOLS}.values())
@@ -97,6 +107,7 @@ _ROUTE_MAP: dict[str, tuple[str, list]] = {
     "ml":        (ML_MODEL,        ML_TOOLS),
     "analytics": (ML_MODEL,        ANALYTICS_TOOLS),
     "sql":       (SQL_MODEL,       SQL_TOOLS),
+    "ingest":    (DATA_MODEL,      INGEST_TOOLS),  # Haiku — fast, no heavy reasoning
 }
 
 # Tool name -> category (for auto-detection from plan)
@@ -141,6 +152,9 @@ def _detect_category(plan: list[str], step: int) -> str:
         "ml":   ["predict", "risk", "scenario", "evaluat", "metric", "compare",
                  "rmse", "f1", "accuracy"],
         "sql":  ["sql", "query", "table", "database", "schema"],
+        "ingest": ["ingest", "load dataset", "fetch dataset", "download data",
+                   "profile", "eda", "new dataset", "add to database", "import csv",
+                   "load csv", "load excel", "list tables", "list db"],
     }
     for cat, kws in keywords.items():
         if any(kw in step_text for kw in kws):
