@@ -696,12 +696,12 @@ export default function App() {
         </div>
       </header>
 
-      {/* Tab content */}
-      <main style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column' }}>
-        {tab === 'query'   && <QueryTab   onChartAdded={addCharts} />}
-        {tab === 'dash'    && <DashboardTab sessionCharts={charts} />}
-        {tab === 'sources' && <DataSourcesTab />}
-        {tab === 'alerts'  && <AlertsTab onChartAdded={addCharts} />}
+      {/* Tab content — all tabs stay mounted so state persists across switches */}
+      <main style={{ flex:1, overflow:'hidden', position:'relative' }}>
+        <div style={{ display: tab==='query'  ?'flex':'none', flexDirection:'column', height:'100%' }}><QueryTab   onChartAdded={addCharts} /></div>
+        <div style={{ display: tab==='dash'   ?'flex':'none', flexDirection:'column', height:'100%' }}><DashboardTab sessionCharts={charts} /></div>
+        <div style={{ display: tab==='sources'?'flex':'none', flexDirection:'column', height:'100%' }}><DataSourcesTab /></div>
+        <div style={{ display: tab==='alerts' ?'flex':'none', flexDirection:'column', height:'100%' }}><AlertsTab onChartAdded={addCharts} /></div>
       </main>
     </div>
   )
