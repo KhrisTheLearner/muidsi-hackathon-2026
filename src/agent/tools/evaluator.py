@@ -29,7 +29,7 @@ def _score(query: str, answer: str, tool_calls: list) -> dict[str, float]:
 
     return {
         "completeness": min(5.0, max(1.0, words / 60)),
-        "data_quality":  min(5.0, max(1.0, numbers / 3)),
+        "data_quality":  min(5.0, max(1.0, 1.0 + numbers * 1.5)),
         "tool_usage":    min(5.0, max(1.0, n_tools)),
         "citation":      min(5.0, max(0.0, citations)),
         "specificity":   4.0 if has_specific else 1.0,

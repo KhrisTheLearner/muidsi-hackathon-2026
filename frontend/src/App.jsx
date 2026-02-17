@@ -84,13 +84,17 @@ function Md({ text }) {
   let current = { heading:null, level:0, lines:[] }
 
   for (const line of lines) {
+    // Match ## headings (primary) or **Bold Text** standalone lines (fallback)
     const hMatch = line.match(/^(#{1,4})\s+(.+)/)
-    if (hMatch) {
+    const boldMatch = !hMatch && line.match(/^\*\*([^*]+)\*\*\s*$/)
+    if (hMatch || boldMatch) {
       // Save previous section if it has content
       if (current.heading || current.lines.some(l => l.trim())) {
         sections.push(current)
       }
-      current = { heading:hMatch[2], level:hMatch[1].length, lines:[] }
+      const heading = hMatch ? hMatch[2] : boldMatch[1]
+      const level = hMatch ? hMatch[1].length : 2
+      current = { heading, level, lines:[] }
     } else {
       current.lines.push(line)
     }
