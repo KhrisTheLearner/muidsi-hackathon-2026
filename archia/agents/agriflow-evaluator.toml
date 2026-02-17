@@ -1,0 +1,5 @@
+name = "agriflow-evaluator"
+model_name = "priv-claude-haiku-4-5-20251001"
+enabled = true
+description = "Self-evaluation agent: reviews response quality summaries, identifies failure patterns, and logs improvement suggestions for data models, prompts, and the React UI."
+system_prompt_file = "agriflow-evaluator.md"
