@@ -1,7 +1,7 @@
 {
   "name": "AgriFlow",
-  "version": "2.0.0",
-  "description": "Food supply chain intelligence agent with 32 tools across 6 specialized categories including ML analytics",
+  "version": "2.1.0",
+  "description": "Food supply chain intelligence agent with 37 tools across 7 specialized categories including ML analytics and data ingestion",
   "agents": [
     {
       "name": "agriflow-planner",
@@ -58,6 +58,14 @@
       "description": "Legacy alias for agriflow-analytics. Routes to same prompt and model.",
       "mcp_tools": [],
       "tools_bound": 3
+    },
+    {
+      "name": "agriflow-ingest",
+      "model": "priv-claude-haiku-4-5-20251001",
+      "role": "Data ingestion",
+      "description": "Fetch, profile, clean, and load external CSV/Excel datasets into agriflow.db. Uses Haiku for cost-efficient deterministic tasks.",
+      "mcp_tools": [],
+      "tools_bound": 5
     }
   ],
   "tools": {
@@ -251,6 +259,43 @@
         "output": "Plotly JSON",
         "description": "Risk assessment heatmaps for county-vs-factor matrices",
         "params": ["title", "data_json", "x_col", "y_col", "z_col"]
+      }
+    ],
+    "ingest": [
+      {
+        "name": "list_db_tables",
+        "source": "src/agent/tools/ingest.py",
+        "api": "Local SQLite",
+        "description": "List all tables in agriflow.db with row counts and column counts",
+        "params": []
+      },
+      {
+        "name": "fetch_and_profile_csv",
+        "source": "src/agent/tools/ingest.py",
+        "api": "HTTP / Local filesystem",
+        "description": "Fetch CSV/Excel from URL or path and return EDA profile (shape, dtypes, nulls, stats, sample)",
+        "params": ["url_or_path", "state_filter", "sample_rows"]
+      },
+      {
+        "name": "load_dataset",
+        "source": "src/agent/tools/ingest.py",
+        "api": "HTTP / Local filesystem + SQLite",
+        "description": "Fetch, clean, and load CSV/Excel into agriflow.db with automatic normalization and indexing",
+        "params": ["url_or_path", "table_name", "state_filter", "replace", "sentinel_value"]
+      },
+      {
+        "name": "run_eda_query",
+        "source": "src/agent/tools/ingest.py",
+        "api": "Local SQLite",
+        "description": "Run EDA queries (summary/missing/sample/counties) on any agriflow.db table",
+        "params": ["table", "state", "query_type"]
+      },
+      {
+        "name": "drop_table",
+        "source": "src/agent/tools/ingest.py",
+        "api": "Local SQLite",
+        "description": "Drop a table from agriflow.db. Requires confirm='yes' to prevent accidents.",
+        "params": ["table", "confirm"]
       }
     ],
     "route": [
@@ -510,6 +555,34 @@
       "category": "sql",
       "tools": ["run_sql_query"],
       "description": "Execute read-only SQL queries against the AgriFlow database"
+    },
+    {
+      "name": "List Database Tables",
+      "agent": "agriflow-ingest",
+      "category": "ingest",
+      "tools": ["list_db_tables"],
+      "description": "List all tables in agriflow.db with row counts and column counts"
+    },
+    {
+      "name": "Profile Dataset",
+      "agent": "agriflow-ingest",
+      "category": "ingest",
+      "tools": ["fetch_and_profile_csv"],
+      "description": "EDA profile of a CSV/Excel file from URL or path without loading to database"
+    },
+    {
+      "name": "Load Dataset",
+      "agent": "agriflow-ingest",
+      "category": "ingest",
+      "tools": ["load_dataset"],
+      "description": "Fetch, clean, and load a CSV/Excel dataset into agriflow.db as a new table"
+    },
+    {
+      "name": "Explore Table",
+      "agent": "agriflow-ingest",
+      "category": "ingest",
+      "tools": ["run_eda_query"],
+      "description": "Run EDA queries (summary stats, missing values, samples, county list) on any table"
     }
   ]
 }
