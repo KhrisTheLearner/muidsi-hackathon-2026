@@ -2,7 +2,12 @@
   "permissions": {
     "allow": [
       "Bash(./venv/Scripts/python.exe:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(git push:*)",
+      "Bash(npm install:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(source:*)"
     ]
   }
 }
