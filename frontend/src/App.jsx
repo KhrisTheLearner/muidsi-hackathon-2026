@@ -55,6 +55,119 @@ const Ic = {
   Spin: ({ color = T.green }) => <div style={{ width:12, height:12, borderRadius:'50%', border:`2px solid ${color}`, borderTopColor:'transparent', animation:'spin .7s linear infinite' }} />,
 }
 
+// ─── Markdown renderer (lightweight, no deps) ──────────────────────────────
+function Md({ text }) {
+  if (!text) return null
+  const lines = text.split('\n')
+  const elements = []
+  let i = 0
+
+  while (i < lines.length) {
+    const line = lines[i]
+
+    // Horizontal rule
+    if (/^-{3,}$/.test(line.trim())) {
+      elements.push(<hr key={i} style={{ border:'none', borderTop:`1px solid ${T.border}`, margin:'12px 0' }} />)
+      i++; continue
+    }
+
+    // Headings
+    const hMatch = line.match(/^(#{1,4})\s+(.+)/)
+    if (hMatch) {
+      const level = hMatch[1].length
+      const sizes = { 1:16, 2:14.5, 3:13, 4:12.5 }
+      elements.push(
+        <p key={i} style={{ fontSize:sizes[level], fontWeight:700, color:T.text, margin:'14px 0 6px' }}>
+          {inlineFormat(hMatch[2])}
+        </p>
+      )
+      i++; continue
+    }
+
+    // Unordered list items
+    if (/^\s*[-*]\s+/.test(line)) {
+      const items = []
+      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
+        const indent = lines[i].match(/^(\s*)/)[1].length
+        items.push(
+          <li key={i} style={{ marginLeft: indent > 1 ? 16 : 0, marginBottom:3 }}>
+            {inlineFormat(lines[i].replace(/^\s*[-*]\s+/, ''))}
+          </li>
+        )
+        i++
+      }
+      elements.push(<ul key={`ul-${i}`} style={{ margin:'6px 0', paddingLeft:20, listStyleType:'disc' }}>{items}</ul>)
+      continue
+    }
+
+    // Ordered list items
+    if (/^\s*\d+\.\s+/.test(line)) {
+      const items = []
+      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
+        items.push(
+          <li key={i} style={{ marginBottom:3 }}>
+            {inlineFormat(lines[i].replace(/^\s*\d+\.\s+/, ''))}
+          </li>
+        )
+        i++
+      }
+      elements.push(<ol key={`ol-${i}`} style={{ margin:'6px 0', paddingLeft:20 }}>{items}</ol>)
+      continue
+    }
+
+    // Empty line = spacing
+    if (!line.trim()) {
+      elements.push(<div key={i} style={{ height:8 }} />)
+      i++; continue
+    }
+
+    // Regular paragraph
+    elements.push(<p key={i} style={{ margin:'3px 0', lineHeight:1.65 }}>{inlineFormat(line)}</p>)
+    i++
+  }
+
+  return <div>{elements}</div>
+}
+
+function inlineFormat(text) {
+  // Split by inline patterns and return mixed text/elements
+  const parts = []
+  let remaining = text
+  let key = 0
+
+  while (remaining) {
+    // Code: `...`
+    let m = remaining.match(/^(.*?)`([^`]+)`(.*)$/)
+    if (m) {
+      if (m[1]) parts.push(m[1])
+      parts.push(
+        <code key={key++} style={{ background:'rgba(255,255,255,.08)', padding:'1px 5px', borderRadius:4, fontSize:'0.9em', fontFamily:T.mono, color:'#6ee7b7' }}>
+          {m[2]}
+        </code>
+      )
+      remaining = m[3]; continue
+    }
+    // Bold: **...**
+    m = remaining.match(/^(.*?)\*\*(.+?)\*\*(.*)$/)
+    if (m) {
+      if (m[1]) parts.push(m[1])
+      parts.push(<strong key={key++} style={{ fontWeight:600, color:T.text }}>{m[2]}</strong>)
+      remaining = m[3]; continue
+    }
+    // Italic: *...*
+    m = remaining.match(/^(.*?)\*(.+?)\*(.*)$/)
+    if (m) {
+      if (m[1]) parts.push(m[1])
+      parts.push(<em key={key++}>{m[2]}</em>)
+      remaining = m[3]; continue
+    }
+    // No more patterns
+    parts.push(remaining)
+    break
+  }
+  return parts.length === 1 ? parts[0] : parts
+}
+
 // ─── PlotlyChart ────────────────────────────────────────────────────────────
 function PlotlyChart({ spec, height = 280 }) {
   const ref = useRef(null)
@@ -227,9 +340,9 @@ function QueryTab({ onChartAdded }) {
                       ))}
                     </div>
                   )}
-                  {/* Answer */}
-                  <div style={{ ...card, borderRadius:'4px 12px 12px 12px', whiteSpace:'pre-wrap', fontSize:13, lineHeight:1.65, color:T.text }}>
-                    {msg.answer}
+                  {/* Answer (markdown formatted) */}
+                  <div style={{ ...card, borderRadius:'4px 12px 12px 12px', fontSize:13, lineHeight:1.65, color:T.text }}>
+                    <Md text={msg.answer} />
                   </div>
                   {/* Inline charts */}
                   {msg.charts?.map((ch, j) => (
