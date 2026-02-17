@@ -30,11 +30,31 @@ def planner_node(state: AgriFlowState) -> dict:
     # Parse the plan from the LLM response
     try:
         text = response.content
-        # Find JSON array using regex (handles text before/after the JSON)
-        match = re.search(r"\[.*\]", text, re.DOTALL)
-        if not match:
-            raise ValueError("No JSON array found")
-        plan_data = json.loads(match.group())
+        # Try to find JSON array — LLM often wraps it in ```json ... ``` blocks
+        # First try: extract from code block
+        code_match = re.search(r"```(?:json)?\s*(\[.*?\])\s*```", text, re.DOTALL)
+        if code_match:
+            plan_data = json.loads(code_match.group(1))
+        else:
+            # Second try: find the outermost JSON array by bracket matching
+            # Start from the first `[\n` or `[{` to avoid matching [data] tags
+            array_match = re.search(r"\[\s*\{", text)
+            if not array_match:
+                raise ValueError("No JSON array found")
+            start = array_match.start()
+            # Find the matching closing bracket
+            depth = 0
+            end = start
+            for i in range(start, len(text)):
+                if text[i] == "[":
+                    depth += 1
+                elif text[i] == "]":
+                    depth -= 1
+                    if depth == 0:
+                        end = i + 1
+                        break
+            plan_data = json.loads(text[start:end])
+
         plan = [step.get("task", str(step)) for step in plan_data]
         if not plan:
             raise ValueError("Empty plan")
