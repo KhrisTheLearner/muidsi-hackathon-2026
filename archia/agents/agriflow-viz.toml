@@ -1,6 +1,6 @@
 # AgriFlow Viz Agent - chart and map generation
 name = "agriflow-viz"
-model_name = "priv-claude-3-5-haiku-20241022"
+model_name = "priv-claude-haiku-4-5-20251001"
 enabled = true
 description = "Plotly chart and map generation for data visualization"
 system_prompt_file = "agriflow-viz.md"
