@@ -36,8 +36,16 @@ def _score(query: str, answer: str, tool_calls: list) -> dict[str, float]:
     }
 
 
+_DEFLECTION_PHRASES = [
+    "insufficient data", "need more data", "data gap", "resubmit",
+    "acquire data", "data acquisition", "backfill", "data limitation",
+]
+
+
 def _suggest(scores: dict, tool_calls: list, answer: str) -> list[str]:
     out = []
+    answer_lower = answer.lower()
+
     if scores["completeness"] < 2:
         out.append("ui: Response too brief — synthesizer may need a minimum-length prompt update")
     if scores["data_quality"] < 2:
@@ -49,6 +57,12 @@ def _suggest(scores: dict, tool_calls: list, answer: str) -> list[str]:
     errors = [tc for tc in tool_calls if isinstance(tc.get("args"), dict) and "error" in str(tc.get("args", ""))]
     if errors:
         out.append(f"model: Tool errors detected: {[e['tool'] for e in errors]}")
+
+    # Detect deflection — agent said "need more data" instead of answering
+    deflections = [p for p in _DEFLECTION_PHRASES if p in answer_lower]
+    if deflections:
+        out.append(f"prompt: DEFLECTION detected ({', '.join(deflections)}) — agent must answer with knowledge, not defer")
+
     return out
 
 

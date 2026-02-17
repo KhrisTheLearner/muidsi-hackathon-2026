@@ -15,6 +15,8 @@ Routing table:
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+
 from langchain_core.messages import AIMessage, SystemMessage
 
 from src.agent.llm import (
@@ -216,6 +218,20 @@ INSTRUCTIONS:
    - ALWAYS attempt at least one retry with corrected parameters before giving up.
 4. Missouri city-to-county examples: Columbia=Boone, Springfield=Greene, Jefferson City=Cole,
    Joplin=Jasper, St. Joseph=Buchanan, Rolla=Phelps, Sedalia=Pettis.
+5. DIRECT ANSWERS: If the question is about general agricultural knowledge,
+   methodology, or interpretation that doesn't require specific data lookups,
+   answer directly without tool calls. Don't force tool usage when your
+   knowledge is sufficient. Examples: "What is tar spot?", "How does food
+   insecurity affect children?", "What crops grow best in clay soil?"
+   Provide a thorough, well-structured answer with headings and bullet points.
+6. NEVER DEFLECT: If tools return limited or no data, DO NOT respond with
+   "insufficient data" or "need more data." Instead, combine whatever data
+   you have with your agricultural expertise to give a COMPLETE answer.
+   You know Midwest crop science, drought impacts, disease epidemiology,
+   USDA programs, and food system logistics. USE that knowledge to fill gaps.
+   Example: if NASS has only 1 year of soybean data, use it AND your knowledge
+   of historical yields (MO avg ~47 BU/ACRE), typical drought impacts (25-40%
+   loss at 50% rainfall deficit during pod fill), and regional patterns.
 """
 
     messages = [
@@ -223,7 +239,20 @@ INSTRUCTIONS:
         *state["messages"],
     ]
 
-    response = llm_with_tools.invoke(messages)
+    # Invoke LLM with timeout to prevent hanging on API failures
+    LLM_TIMEOUT = 90  # seconds
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(llm_with_tools.invoke, messages)
+            response = future.result(timeout=LLM_TIMEOUT)
+    except FuturesTimeoutError:
+        response = AIMessage(
+            content=(
+                "I apologize, but the request timed out. This can happen with complex "
+                "queries. Let me provide a direct answer based on what I know, or you "
+                "can try a more specific question."
+            )
+        )
 
     reasoning = state.get("reasoning_trace", [])
     reasoning.append(f"Router: step {step+1} -> [{cat_name}] ({n_tools} tools)")

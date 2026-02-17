@@ -36,15 +36,24 @@ def synthesizer_node(state: AgriFlowState) -> dict:
             last_analysis = msg.content
             break
 
-    # If tool_caller already produced a good analysis, use it directly
-    if last_analysis and not tool_summaries:
-        return {
-            "messages": [AIMessage(content=last_analysis)],
-            "final_answer": last_analysis,
-            "reasoning_trace": state.get("reasoning_trace", []) + [
-                "Synthesis: used tool_caller's analysis directly"
-            ],
-        }
+    # If tool_caller already produced a good, structured analysis, use it directly
+    if last_analysis:
+        skip = False
+        if not tool_summaries:
+            skip = True
+        elif len(last_analysis) > 200:
+            has_structure = any(m in last_analysis for m in ["**", "##", "1.", "- "])
+            if has_structure:
+                skip = True
+
+        if skip:
+            return {
+                "messages": [AIMessage(content=last_analysis)],
+                "final_answer": last_analysis,
+                "reasoning_trace": state.get("reasoning_trace", []) + [
+                    "Synthesis: tool_caller analysis was sufficient — skipped LLM"
+                ],
+            }
 
     # Build a clean prompt for the synthesizer
     synthesis_input = f"""Original question: {original_query}
