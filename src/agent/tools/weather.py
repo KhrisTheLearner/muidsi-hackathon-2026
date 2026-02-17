@@ -55,6 +55,27 @@ MO_COUNTY_COORDS: dict[str, tuple[float, float]] = {
     "St. Louis City": (38.63, -90.20), "Kansas City": (39.10, -94.58),
 }
 
+# City → county lookup for auto-resolution (major MO cities)
+MO_CITY_TO_COUNTY: dict[str, str] = {
+    "columbia": "Boone", "jefferson city": "Cole", "springfield": "Greene",
+    "joplin": "Jasper", "st. joseph": "Buchanan", "cape girardeau": "Cape Girardeau",
+    "sedalia": "Pettis", "rolla": "Phelps", "poplar bluff": "Butler",
+    "west plains": "Howell", "kirksville": "Adair", "hannibal": "Marion",
+    "sikeston": "Scott", "kennett": "Dunklin", "caruthersville": "Pemiscot",
+    "dexter": "Stoddard", "farmington": "St. Francois", "warrensburg": "Johnson",
+    "marshall": "Saline", "maryville": "Nodaway", "independence": "Jackson",
+    "lee's summit": "Jackson", "blue springs": "Jackson", "liberty": "Clay",
+    "st. charles": "St. Charles", "o'fallon": "St. Charles",
+    "branson": "Taney", "lebanon": "Laclede", "neosho": "Newton",
+    "carthage": "Jasper", "nevada": "Vernon", "chillicothe": "Livingston",
+    "fulton": "Callaway", "mexico": "Audrain", "moberly": "Randolph",
+    "trenton": "Grundy", "brookfield": "Linn", "ava": "Douglas",
+    "houston": "Texas", "salem": "Dent", "eminence": "Shannon",
+    "van buren": "Carter", "doniphan": "Ripley", "piedmont": "Wayne",
+    "greenville": "Wayne", "thayer": "Oregon", "mountain view": "Howell",
+    "st. louis": "St. Louis", "kansas city": "Jackson",
+}
+
 
 @tool
 def query_weather(
@@ -78,25 +99,31 @@ def query_weather(
         Dict with daily weather forecast data.
     """
     if latitude is None or longitude is None:
-        # Flexible county matching: strip "County" suffix, case-insensitive
         resolved = None
         if county:
             name = county.replace(" County", "").replace(" county", "").strip()
-            # Try exact match first, then case-insensitive
+            # 1) Try exact county match
             if name in MO_COUNTY_COORDS:
                 resolved = name
             else:
+                # 2) Case-insensitive county match
                 for key in MO_COUNTY_COORDS:
                     if key.lower() == name.lower():
                         resolved = key
                         break
+            # 3) City-to-county auto-resolution
+            if not resolved:
+                mapped = MO_CITY_TO_COUNTY.get(name.lower())
+                if mapped:
+                    resolved = mapped
         if resolved:
             latitude, longitude = MO_COUNTY_COORDS[resolved]
             county = resolved
         else:
             return {
-                "error": f"County '{county}' not found. Provide lat/lon directly or use a Missouri county name.",
-                "hint": "Try just the county name without 'County' suffix, e.g. 'Wayne' not 'Wayne County'.",
+                "error": f"Location '{county}' not found in county or city lookup.",
+                "available_counties_sample": list(MO_COUNTY_COORDS.keys())[:20],
+                "hint": "Use a Missouri county name (e.g. 'Boone') or a city name (e.g. 'Columbia').",
             }
 
     params = {

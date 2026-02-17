@@ -205,8 +205,17 @@ Current execution plan:
 Previously collected data:
 {_summarize_tool_results(state.get('tool_results', {}))}
 
-Execute the next needed tool calls to gather data for the current plan step.
-If you already have all needed data, respond with your analysis (no tool calls).
+INSTRUCTIONS:
+1. Execute tool calls to gather data for the current plan step.
+2. If you already have all needed data, respond with your analysis (no tool calls).
+3. CRITICAL: If a previous tool returned an error, you MUST self-correct and retry:
+   - If a location/county was not found, try alternate names (city->county, abbreviations).
+   - If an API returned no data, try different parameters (broader date range, different format).
+   - If a column was not found, call list_tables or query with fewer columns.
+   - NEVER report a tool error back to the user as your final answer.
+   - ALWAYS attempt at least one retry with corrected parameters before giving up.
+4. Missouri city-to-county examples: Columbia=Boone, Springfield=Greene, Jefferson City=Cole,
+   Joplin=Jasper, St. Joseph=Buchanan, Rolla=Phelps, Sedalia=Pettis.
 """
 
     messages = [
