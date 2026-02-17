@@ -9,6 +9,7 @@ Run with:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import time
@@ -16,9 +17,12 @@ import uuid
 from typing import Any
 
 from dotenv import load_dotenv
+import asyncio
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from langchain_core.messages import HumanMessage, ToolMessage
+from fastapi.responses import StreamingResponse
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from pydantic import BaseModel
 
 load_dotenv()
@@ -41,6 +45,33 @@ app.add_middleware(
 )
 
 agent = create_agent()
+
+# ---------------------------------------------------------------------------
+# Response cache — avoids re-running identical queries (10-min TTL)
+# ---------------------------------------------------------------------------
+_response_cache: dict[str, tuple[float, dict]] = {}
+_CACHE_TTL = 600  # 10 minutes
+
+
+def _cache_key(query: str) -> str:
+    """Normalize query and hash for cache lookup."""
+    normalized = query.strip().lower()
+    return hashlib.md5(normalized.encode()).hexdigest()
+
+
+def _get_cached_response(query: str) -> dict | None:
+    key = _cache_key(query)
+    if key in _response_cache:
+        ts, data = _response_cache[key]
+        if time.monotonic() - ts < _CACHE_TTL:
+            return data
+        del _response_cache[key]
+    return None
+
+
+def _set_cached_response(query: str, data: dict) -> None:
+    _response_cache[_cache_key(query)] = (time.monotonic(), data)
+
 
 # In-memory chart store for the session
 _chart_store: dict[str, dict] = {}
@@ -136,6 +167,12 @@ async def query_agent(request: QueryRequest):
             reasoning_trace=[], tool_calls=[], charts=[],
         )
 
+    # Check response cache — instant return for identical queries
+    cached = _get_cached_response(query)
+    if cached:
+        cached["reasoning_trace"] = ["Cache: returning cached response (< 10 min old)"] + cached.get("reasoning_trace", [])
+        return QueryResponse(**cached)
+
     initial_state = {
         "messages": [HumanMessage(content=query)],
         "plan": [],
@@ -182,13 +219,120 @@ async def query_agent(request: QueryRequest):
     if analytics_report and "charts" in analytics_report:
         charts.extend(analytics_report.get("charts", []))
 
-    return QueryResponse(
-        answer=final_answer,
-        reasoning_trace=result.get("reasoning_trace", []),
-        tool_calls=tool_calls,
-        charts=charts,
-        analytics_report=analytics_report,
-    )
+    response_data = {
+        "answer": final_answer,
+        "reasoning_trace": result.get("reasoning_trace", []),
+        "tool_calls": tool_calls,
+        "charts": charts,
+        "analytics_report": analytics_report,
+    }
+
+    # Cache successful responses for instant replay
+    if final_answer and "error" not in final_answer.lower():
+        _set_cached_response(query, response_data)
+
+    return QueryResponse(**response_data)
+
+
+@app.post("/api/query/stream")
+async def query_agent_stream(request: QueryRequest):
+    """Stream query progress via Server-Sent Events.
+
+    Emits events: status, tool_start, tool_end, reasoning, answer.
+    The frontend can progressively render each step as it arrives.
+    """
+    query = request.query.strip()
+    if not query or len(query) > 2000:
+        async def _err():
+            msg = "Please provide a question." if not query else "Query too long."
+            yield f"data: {json.dumps({'type': 'answer', 'data': {'answer': msg, 'reasoning_trace': [], 'tool_calls': [], 'charts': []}})}\n\n"
+        return StreamingResponse(_err(), media_type="text/event-stream")
+
+    initial_state = {
+        "messages": [HumanMessage(content=query)],
+        "plan": [],
+        "current_step": 0,
+        "tool_results": {},
+        "reasoning_trace": [],
+        "final_answer": None,
+        "charts": [],
+    }
+
+    async def event_generator():
+        yield f"data: {json.dumps({'type': 'status', 'message': 'Analyzing query...'})}\n\n"
+
+        try:
+            # Run the graph with streaming events
+            seen_tools: set[str] = set()
+            result = None
+
+            async for event in agent.astream_events(initial_state, version="v2"):
+                ename = event.get("event", "")
+                etype = event.get("name", "")
+
+                if ename == "on_chain_start" and etype == "planner":
+                    yield f"data: {json.dumps({'type': 'status', 'message': 'Planning approach...'})}\n\n"
+
+                elif ename == "on_chain_start" and etype == "router":
+                    yield f"data: {json.dumps({'type': 'status', 'message': 'Routing query...'})}\n\n"
+
+                elif ename == "on_chain_start" and etype == "tool_caller":
+                    yield f"data: {json.dumps({'type': 'status', 'message': 'Calling tools...'})}\n\n"
+
+                elif ename == "on_tool_start":
+                    tool_name = event.get("name", "unknown")
+                    if tool_name not in seen_tools:
+                        seen_tools.add(tool_name)
+                        yield f"data: {json.dumps({'type': 'tool_start', 'tool': tool_name})}\n\n"
+
+                elif ename == "on_tool_end":
+                    tool_name = event.get("name", "unknown")
+                    yield f"data: {json.dumps({'type': 'tool_end', 'tool': tool_name})}\n\n"
+
+                elif ename == "on_chain_start" and etype in ("synthesizer", "finalizer"):
+                    yield f"data: {json.dumps({'type': 'status', 'message': 'Synthesizing response...'})}\n\n"
+
+                elif ename == "on_chain_end" and etype in ("synthesizer", "finalizer"):
+                    output = event.get("data", {}).get("output", {})
+                    if isinstance(output, dict) and output.get("final_answer"):
+                        result = output
+
+            # Build final response from the last state
+            if result is None:
+                # Fallback: run synchronously
+                result = await asyncio.to_thread(agent.invoke, initial_state)
+
+            tool_calls = []
+            for msg in result.get("messages", []):
+                if hasattr(msg, "tool_calls") and msg.tool_calls:
+                    for tc in msg.tool_calls:
+                        tool_calls.append({"tool": tc["name"], "args": tc["args"]})
+
+            charts = _extract_charts(result.get("messages", []))
+            analytics_report = _extract_analytics(result.get("messages", []))
+            final_answer = result.get("final_answer", "No answer generated.")
+
+            if analytics_report and "charts" in analytics_report:
+                charts.extend(analytics_report.get("charts", []))
+
+            response_data = {
+                "answer": final_answer,
+                "reasoning_trace": result.get("reasoning_trace", []),
+                "tool_calls": tool_calls,
+                "charts": charts,
+                "analytics_report": analytics_report,
+            }
+
+            # Send reasoning steps individually
+            for step in result.get("reasoning_trace", []):
+                yield f"data: {json.dumps({'type': 'reasoning', 'step': step})}\n\n"
+
+            yield f"data: {json.dumps({'type': 'answer', 'data': response_data})}\n\n"
+
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'answer', 'data': {'answer': f'Agent error: {type(e).__name__}. Please try again.', 'reasoning_trace': [str(e)], 'tool_calls': [], 'charts': []}})}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @app.get("/api/charts")

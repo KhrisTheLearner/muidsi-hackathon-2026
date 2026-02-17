@@ -17,6 +17,7 @@ import json
 import math
 import os
 import sqlite3
+import time as _time
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +46,25 @@ except ImportError:
 DB_PATH = os.getenv("DB_PATH", "data/agriflow.db")
 MODEL_DIR = Path(os.getenv("MODEL_DIR", "models"))
 MODEL_DIR.mkdir(exist_ok=True)
+
+# ---------------------------------------------------------------------------
+# Feature matrix cache — avoids redundant SQL + pandas rebuilds
+# ---------------------------------------------------------------------------
+_feature_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+_CACHE_TTL = 300  # 5 minutes
+
+
+def _get_cached_features(state: str) -> list[dict[str, Any]] | None:
+    """Return cached feature matrix if fresh, else None."""
+    if state in _feature_cache:
+        ts, data = _feature_cache[state]
+        if _time.time() - ts < _CACHE_TTL:
+            return data
+    return None
+
+
+def _set_cached_features(state: str, data: list[dict[str, Any]]) -> None:
+    _feature_cache[state] = (_time.time(), data)
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -120,6 +140,10 @@ def build_feature_matrix(
     Returns:
         List of dicts — each dict is one county with all features.
     """
+    cached = _get_cached_features(state)
+    if cached is not None:
+        return cached
+
     food_env = _load_food_environment(state)
     if food_env.empty:
         return [{"error": "No food_environment data found. Run data pipeline first."}]
@@ -169,7 +193,9 @@ def build_feature_matrix(
         df["tract_count"] = df["tract_count"].fillna(0)
         df["urban_pct"] = df["urban_pct"].fillna(0.5)
 
-    return df.to_dict(orient="records")
+    result = df.to_dict(orient="records")
+    _set_cached_features(state, result)
+    return result
 
 
 # ---------------------------------------------------------------------------
