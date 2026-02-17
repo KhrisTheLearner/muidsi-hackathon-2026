@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import uuid
 from typing import Any
 
@@ -23,6 +24,7 @@ from pydantic import BaseModel
 load_dotenv()
 
 from src.agent.graph import create_agent  # noqa: E402
+from src.agent.tools.evaluator import evaluate_response, get_evaluation_summary  # noqa: E402
 
 app = FastAPI(
     title="AgriFlow API",
@@ -144,6 +146,7 @@ async def query_agent(request: QueryRequest):
         "charts": [],
     }
 
+    t0 = time.monotonic()
     try:
         result = agent.invoke(initial_state)
     except Exception as e:
@@ -152,6 +155,7 @@ async def query_agent(request: QueryRequest):
             reasoning_trace=[f"Error: {e}"],
             tool_calls=[], charts=[],
         )
+    duration_ms = int((time.monotonic() - t0) * 1000)
 
     tool_calls = []
     for msg in result.get("messages", []):
@@ -161,13 +165,25 @@ async def query_agent(request: QueryRequest):
 
     charts = _extract_charts(result.get("messages", []))
     analytics_report = _extract_analytics(result.get("messages", []))
+    final_answer = result.get("final_answer", "No answer generated.")
+
+    # Auto-evaluate in background (zero LLM token cost — pure heuristics)
+    try:
+        evaluate_response.invoke({
+            "query":          query,
+            "answer":         final_answer,
+            "tool_calls_json": json.dumps(tool_calls),
+            "duration_ms":    duration_ms,
+        })
+    except Exception:
+        pass  # Never let eval failure block the response
 
     # If analytics report has embedded charts, merge them
     if analytics_report and "charts" in analytics_report:
         charts.extend(analytics_report.get("charts", []))
 
     return QueryResponse(
-        answer=result.get("final_answer", "No answer generated."),
+        answer=final_answer,
         reasoning_trace=result.get("reasoning_trace", []),
         tool_calls=tool_calls,
         charts=charts,
@@ -187,6 +203,15 @@ async def get_chart(chart_id: str):
     if chart_id in _chart_store:
         return _chart_store[chart_id]
     return {"error": "Chart not found"}
+
+
+@app.get("/api/eval/summary")
+async def eval_summary():
+    """Return heuristic quality summary across recent AgriFlow responses."""
+    try:
+        return get_evaluation_summary.invoke({"last_n": 30})
+    except Exception as e:
+        return {"error": str(e), "total": 0}
 
 
 @app.get("/api/health")

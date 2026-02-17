@@ -412,6 +412,20 @@ SKILLS = [
             "Useful for diagnosing data quality issues or planning downstream analysis."
         ),
     },
+    # ── Self-Evaluation (3 tools) ─────────────────────────────────────
+    {
+        "name": "System Self-Evaluation",
+        "description": "Review AgriFlow response quality, identify failure patterns, and log improvement suggestions for prompts, routing, data models, and the UI",
+        "agent": "agriflow-evaluator",
+        "instructions": (
+            "Use `get_evaluation_summary` to load recent quality stats, then analyze top_issues "
+            "for systemic patterns. For each pattern, call `suggest_improvement` with the correct "
+            "category ('prompt', 'routing', 'data', 'model', or 'ui') and a specific actionable fix. "
+            "Set priority to 'high' if the issue affects >50% of queries, 'medium' for quality "
+            "degradation, 'low' for polish. Return a summary of issues found and suggestions logged. "
+            "Haiku model — keep analysis concise, avoid redundant tool calls."
+        ),
+    },
     # ── SQL / Database (2 tools) ──────────────────────────────────────
     {
         "name": "Database Explorer",
