@@ -236,7 +236,7 @@ SKILLS = [
         ),
     },
     {
-        "name": "Full Analytics Pipeline",
+        "name": "Analytics Pipeline (Full)",
         "description": "Run complete ML analytics pipeline: data collection, model training, prediction, validation, visualization, and analysis",
         "agent": "agriflow-analytics",
         "instructions": (

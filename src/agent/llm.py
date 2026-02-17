@@ -27,7 +27,7 @@ ARCHIA_BASE_URL = "https://registry.archia.app/v1"
 
 # Model routing: specialized agents use smaller tool sets = fewer tokens.
 # Haiku 3.5 for simple fetch/format tasks, Sonnet for complex reasoning.
-FAST_MODEL = os.getenv("FAST_MODEL", "priv-claude-3-5-haiku-20241022")
+FAST_MODEL = os.getenv("FAST_MODEL", "priv-claude-haiku-4-5-20251001")
 PLANNER_MODEL = os.getenv("PLANNER_MODEL", FAST_MODEL)
 DATA_MODEL = os.getenv("DATA_MODEL", FAST_MODEL)
 VIZ_MODEL = os.getenv("VIZ_MODEL", FAST_MODEL)

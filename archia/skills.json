@@ -488,7 +488,7 @@
       "description": "Web search for emerging agricultural risks including pests, diseases, and weather threats"
     },
     {
-      "name": "Full Analytics Pipeline",
+      "name": "Analytics Pipeline (Full)",
       "agent": "agriflow-analytics",
       "category": "analytics",
       "tools": ["run_analytics_pipeline"],
