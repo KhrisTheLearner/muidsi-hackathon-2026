@@ -65,6 +65,9 @@ DATA_TOOLS = [
 
 VIZ_TOOLS = [
     create_bar_chart, create_line_chart, create_scatter_map, create_risk_heatmap,
+    # Include data tools so viz agent can query data if not already in context
+    query_food_atlas, query_food_access, query_nass, query_weather,
+    query_fema_disasters, query_census_acs, run_prediction,
 ]
 
 ROUTE_TOOLS = [
@@ -208,30 +211,30 @@ Previously collected data:
 {_summarize_tool_results(state.get('tool_results', {}))}
 
 INSTRUCTIONS:
-1. Execute tool calls to gather data for the current plan step.
-2. If you already have all needed data, respond with your analysis (no tool calls).
-3. CRITICAL: If a previous tool returned an error, you MUST self-correct and retry:
+1. Execute the tool call(s) specified in the CURRENT plan step (marked with >).
+2. If the current step is [viz], [route], [analytics], or [ml], you MUST call \
+the appropriate tool — NEVER skip these steps with a text-only response. For [viz] \
+steps, extract data from prior ToolMessage results and pass it as data_json.
+3. Only respond without tool calls if this is a [data] step AND the data is already available.
+4. CRITICAL: If a previous tool returned an error, you MUST self-correct and retry:
    - If a location/county was not found, try alternate names (city->county, abbreviations).
    - If an API returned no data, try different parameters (broader date range, different format).
    - If a column was not found, call list_tables or query with fewer columns.
    - NEVER report a tool error back to the user as your final answer.
    - ALWAYS attempt at least one retry with corrected parameters before giving up.
-4. Missouri city-to-county examples: Columbia=Boone, Springfield=Greene, Jefferson City=Cole,
+5. Missouri city-to-county examples: Columbia=Boone, Springfield=Greene, Jefferson City=Cole,
    Joplin=Jasper, St. Joseph=Buchanan, Rolla=Phelps, Sedalia=Pettis.
-5. DIRECT ANSWERS: If the question is about general agricultural knowledge,
+6. DIRECT ANSWERS: If the question is about general agricultural knowledge,
    methodology, or interpretation that doesn't require specific data lookups,
    answer directly without tool calls. Don't force tool usage when your
    knowledge is sufficient. Examples: "What is tar spot?", "How does food
    insecurity affect children?", "What crops grow best in clay soil?"
    Provide a thorough, well-structured answer with headings and bullet points.
-6. NEVER DEFLECT: If tools return limited or no data, DO NOT respond with
+7. NEVER DEFLECT: If tools return limited or no data, DO NOT respond with
    "insufficient data" or "need more data." Instead, combine whatever data
    you have with your agricultural expertise to give a COMPLETE answer.
    You know Midwest crop science, drought impacts, disease epidemiology,
    USDA programs, and food system logistics. USE that knowledge to fill gaps.
-   Example: if NASS has only 1 year of soybean data, use it AND your knowledge
-   of historical yields (MO avg ~47 BU/ACRE), typical drought impacts (25-40%
-   loss at 50% rainfall deficit during pod fill), and regional patterns.
 """
 
     messages = [
