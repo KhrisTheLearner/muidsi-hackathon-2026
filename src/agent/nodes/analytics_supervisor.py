@@ -19,6 +19,7 @@ layer — only the final analysis step needs an LLM.
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from langchain_core.tools import tool
@@ -259,19 +260,32 @@ def run_analytics_pipeline(
         "model_type": model_type,
     }
 
-    # ── Step 1: Research (skip for quick_predict) ──────────────
-    if pipeline in ("full_analysis", "risk_scan"):
-        research = _research_subagent(state, search_query)
-        analytics_report["web_research"] = research.get("web_research", [])
-        sources.extend(research.get("sources", []))
+    # ── Phase 1: Research + Data in PARALLEL ─────────────────
+    research = {"web_research": [], "sources": []}
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = {}
+        if pipeline in ("full_analysis", "risk_scan"):
+            futures["research"] = pool.submit(_research_subagent, state, search_query)
+        futures["data"] = pool.submit(_data_subagent, state)
 
-    # ── Step 2: Data ───────────────────────────────────────────
-    data = _data_subagent(state)
+        for key, fut in futures.items():
+            try:
+                result = fut.result(timeout=30)
+                if key == "research":
+                    research = result
+                elif key == "data":
+                    data = result
+            except Exception:
+                if key == "data":
+                    data = {"n_counties": 0, "n_features": 0, "sources": []}
+
+    analytics_report["web_research"] = research.get("web_research", [])
+    sources.extend(research.get("sources", []))
     analytics_report["n_counties"] = data["n_counties"]
     analytics_report["n_features"] = data["n_features"]
     sources.extend(data.get("sources", []))
 
-    # ── Step 3: ML ─────────────────────────────────────────────
+    # ── Phase 2: ML training + prediction (sequential, needs data) ──
     ml = _ml_subagent(state, model_type, target_col, scenario, yield_reduction_pct, top_n)
     if "error" in ml:
         analytics_report["error"] = ml["error"]
@@ -288,20 +302,35 @@ def run_analytics_pipeline(
     }
     sources.extend(ml.get("sources", []))
 
-    # ── Step 4: Verification ───────────────────────────────────
-    verify = _verify_subagent(ml["model_info"], state, model_type, target_col)
+    # ── Phase 3: Verification + Visualization in PARALLEL ──────
+    verify = {}
+    charts_list: list[dict] = []
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        verify_fut = pool.submit(
+            _verify_subagent, ml["model_info"], state, model_type, target_col,
+        )
+        if pipeline in ("full_analysis", "risk_scan"):
+            viz_fut = pool.submit(_viz_subagent, ml["predictions"], state)
+        else:
+            viz_fut = None
+
+        try:
+            verify = verify_fut.result(timeout=60)
+        except Exception:
+            verify = {"metrics": {}, "feature_importance": {}, "anomalies": []}
+
+        if viz_fut is not None:
+            try:
+                charts_list = viz_fut.result(timeout=30)
+            except Exception:
+                charts_list = []
+
     analytics_report["evaluation"] = verify.get("metrics", {})
     analytics_report["feature_importance"] = verify.get("feature_importance", {})
     analytics_report["anomalies"] = verify.get("anomalies", [])
+    analytics_report["charts"] = charts_list
 
-    # ── Step 5: Visualization (skip for quick_predict) ─────────
-    if pipeline in ("full_analysis", "risk_scan"):
-        charts = _viz_subagent(ml["predictions"], state)
-        analytics_report["charts"] = charts
-    else:
-        analytics_report["charts"] = []
-
-    # ── Step 6: Analysis ───────────────────────────────────────
+    # ── Phase 4: Analysis narrative (pure Python, fast) ────────
     narrative = _analysis_subagent(
         predictions=ml["predictions"],
         metrics=verify.get("metrics", {}),

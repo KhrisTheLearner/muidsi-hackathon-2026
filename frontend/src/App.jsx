@@ -4,7 +4,7 @@
  * Tabs: Query · Dashboard · Data Sources · Map & Alerts
  */
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { queryAgent, getHealth, getExamples, getCharts, getAnalytics, getEvalSummary } from './api'
+import { queryAgent, queryAgentStream, getHealth, getExamples, getCharts, getAnalytics, getEvalSummary } from './api'
 
 // ─── Theme ─────────────────────────────────────────────────────────────────
 const T = {
@@ -56,31 +56,91 @@ const Ic = {
 }
 
 // ─── Markdown renderer (lightweight, no deps) ──────────────────────────────
+// ─── Collapsible Section ────────────────────────────────────────────────────
+function CollapsibleSection({ title, children, defaultOpen = false, level = 2 }) {
+  const [open, setOpen] = useState(defaultOpen)
+  const sizes = { 1:16, 2:14.5, 3:13, 4:12.5 }
+  return (
+    <div style={{ margin:'4px 0' }}>
+      <button onClick={() => setOpen(!open)} style={{
+        display:'flex', alignItems:'center', gap:6, width:'100%', textAlign:'left',
+        background:'none', border:'none', cursor:'pointer', padding:'6px 0',
+        color: T.text, fontSize: sizes[level] || 13, fontWeight:700,
+      }}>
+        <span style={{ fontSize:10, color:T.muted, transition:'transform .2s', transform: open?'rotate(90deg)':'rotate(0deg)', display:'inline-block' }}>&#9654;</span>
+        {title}
+      </button>
+      {open && <div style={{ paddingLeft:16, borderLeft:`2px solid ${T.border}`, marginLeft:4, marginBottom:4 }}>{children}</div>}
+    </div>
+  )
+}
+
 function Md({ text }) {
   if (!text) return null
   const lines = text.split('\n')
+
+  // Parse into sections: { heading, level, lines[] }
+  const sections = []
+  let current = { heading:null, level:0, lines:[] }
+
+  for (const line of lines) {
+    const hMatch = line.match(/^(#{1,4})\s+(.+)/)
+    if (hMatch) {
+      // Save previous section if it has content
+      if (current.heading || current.lines.some(l => l.trim())) {
+        sections.push(current)
+      }
+      current = { heading:hMatch[2], level:hMatch[1].length, lines:[] }
+    } else {
+      current.lines.push(line)
+    }
+  }
+  if (current.heading || current.lines.some(l => l.trim())) {
+    sections.push(current)
+  }
+
+  // Sections that should be hidden if they have no real content
+  const OPTIONAL = /model performance|risk drivers|emerging threats|external threats|data sources consulted/i
+
+  // Sections that should default to open
+  const DEFAULT_OPEN = /analysis summary|key findings|recommendations|overview/i
+
+  return (
+    <div>
+      {sections.map((sec, si) => {
+        const bodyElements = renderLines(sec.lines, si * 1000)
+
+        // Skip empty optional sections
+        const hasContent = sec.lines.some(l => l.trim() && !/^-{3,}$/.test(l.trim()))
+        if (sec.heading && OPTIONAL.test(sec.heading) && !hasContent) return null
+
+        // No heading = preamble text, render directly
+        if (!sec.heading) return <div key={si}>{bodyElements}</div>
+
+        // Collapsible section
+        const isOpen = DEFAULT_OPEN.test(sec.heading)
+        return (
+          <CollapsibleSection key={si} title={inlineFormat(sec.heading)} defaultOpen={isOpen} level={sec.level}>
+            {bodyElements}
+          </CollapsibleSection>
+        )
+      })}
+    </div>
+  )
+}
+
+/** Render an array of markdown lines into React elements */
+function renderLines(lines, keyOffset = 0) {
   const elements = []
   let i = 0
 
   while (i < lines.length) {
     const line = lines[i]
+    const k = keyOffset + i
 
     // Horizontal rule
     if (/^-{3,}$/.test(line.trim())) {
-      elements.push(<hr key={i} style={{ border:'none', borderTop:`1px solid ${T.border}`, margin:'12px 0' }} />)
-      i++; continue
-    }
-
-    // Headings
-    const hMatch = line.match(/^(#{1,4})\s+(.+)/)
-    if (hMatch) {
-      const level = hMatch[1].length
-      const sizes = { 1:16, 2:14.5, 3:13, 4:12.5 }
-      elements.push(
-        <p key={i} style={{ fontSize:sizes[level], fontWeight:700, color:T.text, margin:'14px 0 6px' }}>
-          {inlineFormat(hMatch[2])}
-        </p>
-      )
+      elements.push(<hr key={k} style={{ border:'none', borderTop:`1px solid ${T.border}`, margin:'12px 0' }} />)
       i++; continue
     }
 
@@ -90,13 +150,13 @@ function Md({ text }) {
       while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
         const indent = lines[i].match(/^(\s*)/)[1].length
         items.push(
-          <li key={i} style={{ marginLeft: indent > 1 ? 16 : 0, marginBottom:3 }}>
+          <li key={keyOffset+i} style={{ marginLeft: indent > 1 ? 16 : 0, marginBottom:3 }}>
             {inlineFormat(lines[i].replace(/^\s*[-*]\s+/, ''))}
           </li>
         )
         i++
       }
-      elements.push(<ul key={`ul-${i}`} style={{ margin:'6px 0', paddingLeft:20, listStyleType:'disc' }}>{items}</ul>)
+      elements.push(<ul key={`ul-${k}`} style={{ margin:'6px 0', paddingLeft:20, listStyleType:'disc' }}>{items}</ul>)
       continue
     }
 
@@ -105,28 +165,28 @@ function Md({ text }) {
       const items = []
       while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
         items.push(
-          <li key={i} style={{ marginBottom:3 }}>
+          <li key={keyOffset+i} style={{ marginBottom:3 }}>
             {inlineFormat(lines[i].replace(/^\s*\d+\.\s+/, ''))}
           </li>
         )
         i++
       }
-      elements.push(<ol key={`ol-${i}`} style={{ margin:'6px 0', paddingLeft:20 }}>{items}</ol>)
+      elements.push(<ol key={`ol-${k}`} style={{ margin:'6px 0', paddingLeft:20 }}>{items}</ol>)
       continue
     }
 
     // Empty line = spacing
     if (!line.trim()) {
-      elements.push(<div key={i} style={{ height:8 }} />)
+      elements.push(<div key={k} style={{ height:6 }} />)
       i++; continue
     }
 
     // Regular paragraph
-    elements.push(<p key={i} style={{ margin:'3px 0', lineHeight:1.65 }}>{inlineFormat(line)}</p>)
+    elements.push(<p key={k} style={{ margin:'3px 0', lineHeight:1.65 }}>{inlineFormat(line)}</p>)
     i++
   }
 
-  return <div>{elements}</div>
+  return elements
 }
 
 function inlineFormat(text) {
@@ -264,6 +324,8 @@ function QueryTab({ onChartAdded }) {
   const [messages, setMessages]     = useState([])
   const [input, setInput]           = useState('')
   const [loading, setLoading]       = useState(false)
+  const [streamStatus, setStreamStatus] = useState('')
+  const [activeTools, setActiveTools]   = useState([])
   const [examples, setExamples]     = useState([])
   const endRef = useRef(null)
 
@@ -275,16 +337,44 @@ function QueryTab({ onChartAdded }) {
     if (!q || loading) return
     setInput('')
     setLoading(true)
+    setStreamStatus('Analyzing query...')
+    setActiveTools([])
     setMessages(prev => [...prev, { role:'user', text: q }])
 
     try {
-      const res = await queryAgent(q)
-      setMessages(prev => [...prev, { role:'agent', ...res }])
-      if (res.charts?.length) onChartAdded(res.charts)
+      await queryAgentStream(q, (evt) => {
+        if (evt.type === 'status') {
+          setStreamStatus(evt.message)
+        } else if (evt.type === 'tool_start') {
+          setStreamStatus(`Running ${evt.tool}...`)
+          setActiveTools(prev => [...prev, evt.tool])
+        } else if (evt.type === 'tool_end') {
+          setActiveTools(prev => prev.filter(t => t !== evt.tool))
+        } else if (evt.type === 'reasoning') {
+          // Reasoning steps arrive in real-time (shown in final message)
+        } else if (evt.type === 'answer') {
+          const res = evt.data
+          setMessages(prev => [...prev, { role:'agent', ...res }])
+          if (res.charts?.length) onChartAdded(res.charts)
+          setLoading(false)
+          setStreamStatus('')
+          setActiveTools([])
+        }
+      })
     } catch {
-      setMessages(prev => [...prev, { role:'agent', answer:'API unavailable — is the backend running? (`uvicorn src.api.main:app --reload`)', reasoning_trace:[], charts:[] }])
+      // Fallback to non-streaming endpoint
+      try {
+        setStreamStatus('Retrying...')
+        const res = await queryAgent(q)
+        setMessages(prev => [...prev, { role:'agent', ...res }])
+        if (res.charts?.length) onChartAdded(res.charts)
+      } catch {
+        setMessages(prev => [...prev, { role:'agent', answer:'API unavailable — is the backend running? (`uvicorn src.api.main:app --reload`)', reasoning_trace:[], charts:[] }])
+      }
     } finally {
       setLoading(false)
+      setStreamStatus('')
+      setActiveTools([])
     }
   }, [input, loading, onChartAdded])
 
@@ -368,15 +458,24 @@ function QueryTab({ onChartAdded }) {
           </div>
         ))}
 
-        {/* Loading state */}
+        {/* Loading state with real-time streaming status */}
         {loading && (
           <div style={{ display:'flex', gap:10, animation:'fadeUp .3s ease' }}>
             <div style={{ width:28, height:28, borderRadius:8, background:'linear-gradient(135deg,#059669,#10b981)', display:'flex', alignItems:'center', justifyContent:'center', color:'#f0fdf4' }}>
               <Ic.Leaf />
             </div>
-            <div style={{ ...card, borderRadius:'4px 12px 12px 12px', display:'flex', alignItems:'center', gap:10 }}>
-              <Ic.Spin />
-              <span style={{ color:T.sub, fontSize:12 }}>Reasoning across data sources...</span>
+            <div style={{ ...card, borderRadius:'4px 12px 12px 12px', display:'flex', flexDirection:'column', gap:6 }}>
+              <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                <Ic.Spin />
+                <span style={{ color:T.text, fontSize:12, fontWeight:500 }}>{streamStatus || 'Processing...'}</span>
+              </div>
+              {activeTools.length > 0 && (
+                <div style={{ display:'flex', flexWrap:'wrap', gap:4, paddingLeft:24 }}>
+                  {activeTools.map((t, i) => (
+                    <span key={i} style={{ fontSize:10, padding:'2px 8px', borderRadius:6, background:T.greenDim, border:`1px solid ${T.greenBd}`, color:T.green }}>{t}</span>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}

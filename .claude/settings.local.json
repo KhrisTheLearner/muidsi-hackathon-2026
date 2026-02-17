@@ -7,7 +7,12 @@
       "Bash(npm install:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(source:*)"
+      "Bash(source:*)",
+      "Bash(bash -c:*)",
+      "Bash(node --version:*)",
+      "Bash(npx vite build)",
+      "WebFetch(domain:blog.langchain.com)",
+      "WebFetch(domain:pessini.medium.com)"
     ]
   }
 }
