@@ -70,6 +70,18 @@ def _router_node(state: AgriFlowState) -> dict:
 
     if len(matches) == 1:
         cat = matches[0]
+        # Viz queries always need data fetched first — create a 2-step plan
+        if cat == "viz":
+            plan = [
+                f"[data] Retrieve relevant data for: {query}",
+                f"[viz] {query}",
+            ]
+            return {
+                "plan": plan,
+                "current_step": 0,
+                "tool_results": {},
+                "reasoning_trace": [f"Router: fast-track [data]+[viz] (skipped planner)"],
+            }
         plan = [f"[{cat}] {query}"]
         return {
             "plan": plan,
@@ -322,10 +334,17 @@ def _direct_viz_node(state: AgriFlowState) -> dict:
         }
 
     # Add the chart result as a ToolMessage so the synthesizer and API can find it
+    # Names must match _CHART_TOOLS in src/api/main.py for extraction
+    _TOOL_NAMES = {
+        "bar": "create_bar_chart",
+        "line": "create_line_chart",
+        "scatter_map": "create_scatter_map",
+        "heatmap": "create_risk_heatmap",
+    }
     result_str = json.dumps(result) if isinstance(result, dict) else str(result)
     chart_msg = ToolMessage(
         content=result_str,
-        name="create_bar_chart" if chart_type == "bar" else f"create_{chart_type}",
+        name=_TOOL_NAMES.get(chart_type, "create_bar_chart"),
         tool_call_id=f"direct_viz_{step}",
     )
 

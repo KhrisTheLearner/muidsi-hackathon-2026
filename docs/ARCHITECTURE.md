@@ -492,6 +492,36 @@ pytest tests/                        # (add unit tests as needed)
 python run_agent.py                  # Interactive mode
 ```
 
+## ML Evaluation Standards
+
+All regression models must report these metrics:
+- **RMSE** — Root Mean Squared Error (lower is better)
+- **MAE** — Mean Absolute Error (interpretable units)
+- **R²** — Coefficient of determination (0–1, higher is better)
+- **CCC** — Concordance Correlation Coefficient (agricultural standard, 0–1)
+
+Minimum acceptable: R² > 0.85, CCC > 0.80. All models generate SHAP values for top 10 features.
+
+## API Rate Limits & Data Freshness
+
+| Source | Rate Limit | Data Vintage |
+| ------ | ---------- | ------------ |
+| USDA NASS | 1000 req/day | Weekly (growing season) |
+| Census ACS | 500 req/day per key | 2022 5-year estimates |
+| Open-Meteo | Unlimited (no key) | 7-day forecast (real-time) |
+| FEMA | Unlimited (public) | Continuous |
+| Food Environment Atlas | Local DB | 2015–2017 |
+
+Always check local database before calling external APIs.
+
+## Test Suites
+
+```bash
+python test_archia_integration.py    # 6 tests — Archia connectivity
+python test_complete_pipeline.py     # 7 tests — End-to-end workflow
+pytest tests/                        # Unit tests
+```
+
 ## Future Enhancements
 
 **Short Term (v2.1):**
