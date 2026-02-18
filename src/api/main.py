@@ -79,7 +79,8 @@ _chart_store: dict[str, dict] = {}
 # Tool names that produce chart/map Plotly specs
 _CHART_TOOLS = {
     "create_bar_chart", "create_line_chart", "create_scatter_map",
-    "create_risk_heatmap", "create_route_map",
+    "create_risk_heatmap", "create_route_map", "create_choropleth_map",
+    "create_chart",
 }
 
 # Tools that return analytics reports with embedded charts
@@ -351,7 +352,8 @@ async def health():
                           "get_feature_importance", "detect_anomalies",
                           "web_search_risks"],
             "viz": ["create_bar_chart", "create_line_chart",
-                    "create_scatter_map", "create_risk_heatmap"],
+                    "create_scatter_map", "create_risk_heatmap",
+                    "create_choropleth_map"],
             "route": ["optimize_delivery_route", "calculate_distance",
                       "create_route_map", "schedule_deliveries"],
         },
