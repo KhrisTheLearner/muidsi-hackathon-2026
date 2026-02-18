@@ -29,6 +29,7 @@ from src.agent.nodes.tool_executor import ALL_TOOLS, tool_caller_node
 from src.agent.state import AgriFlowState
 from src.agent.tools.chart_generator import (
     create_bar_chart, create_line_chart, create_scatter_map, create_risk_heatmap,
+    create_choropleth_map, create_chart,
 )
 
 # ---------------------------------------------------------------------------
@@ -185,13 +186,20 @@ def _extract_data_from_messages(messages: list) -> list[dict]:
     return []
 
 
-def _detect_chart_type(step_text: str, query: str) -> str:
+def _detect_chart_type(step_text: str, query: str, has_fips: bool = False, has_latlon: bool = False) -> str:
     """Detect which chart type to create from plan step + query text."""
     combined = (step_text + " " + query).lower()
-    if any(w in combined for w in ["map", "scatter", "geographic", "geo"]):
-        return "scatter_map"
-    if any(w in combined for w in ["heatmap", "heat map", "matrix"]):
+    # Check heatmap/choropleth BEFORE generic "map" to avoid false positive
+    if any(w in combined for w in ["heatmap", "heat map", "choropleth"]):
+        # Geographic heatmap if we have FIPS data, otherwise matrix heatmap
+        if has_fips:
+            return "choropleth"
         return "heatmap"
+    if any(w in combined for w in ["map", "scatter", "geographic", "geo", "overlay"]):
+        # If data has FIPS but no lat/lon, use choropleth
+        if has_fips and not has_latlon:
+            return "choropleth"
+        return "scatter_map"
     if any(w in combined for w in ["line", "trend", "time series", "over time"]):
         return "line"
     return "bar"
@@ -209,6 +217,7 @@ def _detect_columns(rows: list[dict], chart_type: str, step_text: str) -> dict:
     num_cols = []
     lat_cols = []
     lon_cols = []
+    fips_cols = []
     for c in cols:
         val = rows[0].get(c)
         cl = c.lower()
@@ -216,10 +225,18 @@ def _detect_columns(rows: list[dict], chart_type: str, step_text: str) -> dict:
             lat_cols.append(c)
         elif cl in ("lon", "lng", "longitude"):
             lon_cols.append(c)
+        elif cl in ("fips", "fipscode", "fips_code", "county_fips", "geoid"):
+            fips_cols.append(c)
         elif isinstance(val, (int, float)):
             num_cols.append(c)
         else:
             str_cols.append(c)
+
+    if chart_type == "choropleth":
+        fips = fips_cols[0] if fips_cols else None
+        value = num_cols[0] if num_cols else None
+        text = next((c for c in str_cols if c.lower() not in ("state", "fips")), str_cols[0] if str_cols else "")
+        return {"fips_col": fips, "value_col": value, "text_col": text}
 
     if chart_type == "scatter_map":
         lat = lat_cols[0] if lat_cols else None
@@ -279,7 +296,33 @@ def _direct_viz_node(state: AgriFlowState) -> dict:
             ],
         }
 
-    chart_type = _detect_chart_type(step_text, query)
+    # Detect data capabilities for smart chart type selection
+    sample_keys = {k.lower() for k in rows[0].keys()} if rows else set()
+    has_fips = bool(sample_keys & {"fips", "fipscode", "fips_code", "county_fips", "geoid"})
+    has_latlon = bool(sample_keys & {"lat", "latitude"}) and bool(sample_keys & {"lon", "lng", "longitude"})
+
+    # If user wants a geographic viz but data lacks FIPS, enrich from food_atlas
+    combined_text = (step_text + " " + query).lower()
+    wants_geo = any(w in combined_text for w in ["map", "geographic", "geo", "choropleth", "overlay"])
+    if wants_geo and not has_fips and not has_latlon:
+        # Try to match county names and add FIPS codes
+        county_col = next((c for c in rows[0].keys() if c.lower() in ("county", "name", "county_name")), None)
+        state_col = next((c for c in rows[0].keys() if c.lower() in ("state", "state_name")), None)
+        if county_col:
+            try:
+                from src.agent.tools.food_atlas import query_food_atlas
+                state_val = rows[0].get(state_col, "MO") if state_col else "MO"
+                fips_lookup = query_food_atlas.invoke({"state": state_val, "columns": "FIPS,County", "limit": 500})
+                fips_map = {r["County"].lower(): r["FIPS"] for r in fips_lookup if "County" in r and "FIPS" in r}
+                for row in rows:
+                    county = row.get(county_col, "").lower().replace(" county", "")
+                    if county in fips_map:
+                        row["FIPS"] = fips_map[county]
+                has_fips = any("FIPS" in r for r in rows)
+            except Exception:
+                pass  # Best effort — fall back to non-geographic chart
+
+    chart_type = _detect_chart_type(step_text, query, has_fips=has_fips, has_latlon=has_latlon)
     col_args = _detect_columns(rows, chart_type, step_text)
 
     # Sort and limit for readability
@@ -299,7 +342,15 @@ def _direct_viz_node(state: AgriFlowState) -> dict:
 
     # Call the chart tool directly
     try:
-        if chart_type == "scatter_map" and col_args.get("lat_col") and col_args.get("lon_col"):
+        if chart_type == "choropleth" and col_args.get("fips_col") and col_args.get("value_col"):
+            result = create_choropleth_map.invoke({
+                "title": title,
+                "data_json": data_json,
+                "fips_col": col_args["fips_col"],
+                "value_col": col_args["value_col"],
+                "text_col": col_args.get("text_col", ""),
+            })
+        elif chart_type == "scatter_map" and col_args.get("lat_col") and col_args.get("lon_col"):
             result = create_scatter_map.invoke({
                 "title": title,
                 "data_json": data_json,
@@ -340,6 +391,19 @@ def _direct_viz_node(state: AgriFlowState) -> dict:
         "line": "create_line_chart",
         "scatter_map": "create_scatter_map",
         "heatmap": "create_risk_heatmap",
+        "choropleth": "create_choropleth_map",
+        "scatter": "create_chart",
+        "pie": "create_chart",
+        "histogram": "create_chart",
+        "box": "create_chart",
+        "violin": "create_chart",
+        "area": "create_chart",
+        "funnel": "create_chart",
+        "treemap": "create_chart",
+        "sunburst": "create_chart",
+        "waterfall": "create_chart",
+        "indicator": "create_chart",
+        "bubble": "create_chart",
     }
     result_str = json.dumps(result) if isinstance(result, dict) else str(result)
     chart_msg = ToolMessage(
