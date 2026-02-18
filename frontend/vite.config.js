@@ -7,7 +7,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api/query/stream': {
-        target: 'http://localhost:8000',
+        target: 'http://localhost:8002',
         // Disable buffering so SSE events stream through immediately
         configure: (proxy) => {
           proxy.on('proxyReq', (proxyReq) => {
@@ -19,7 +19,7 @@ export default defineConfig({
           })
         },
       },
-      '/api': { target: 'http://localhost:8000' },
+      '/api': { target: 'http://localhost:8002' },
     },
   },
 })

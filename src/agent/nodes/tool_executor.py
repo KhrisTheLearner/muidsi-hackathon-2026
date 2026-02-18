@@ -30,6 +30,7 @@ from src.agent.state import AgriFlowState
 # ---------------------------------------------------------------------------
 from src.agent.tools.chart_generator import (
     create_bar_chart, create_line_chart, create_risk_heatmap, create_scatter_map,
+    create_choropleth_map, create_chart,
 )
 from src.agent.tools.food_atlas import query_food_access, query_food_atlas
 from src.agent.tools.nass_api import query_nass
@@ -45,7 +46,7 @@ from src.agent.tools.fema_disasters import query_fema_disasters
 from src.agent.tools.ml_engine import (
     build_feature_matrix, detect_anomalies, get_feature_importance,
     predict_crop_yield, predict_risk, train_crop_model, train_risk_model,
-    web_search_risks,
+    web_search_risks, run_eda_pipeline,
 )
 from src.agent.nodes.analytics_supervisor import run_analytics_pipeline
 from src.agent.tools.sql_query import list_tables, run_sql_query
@@ -64,7 +65,7 @@ DATA_TOOLS = [
 ]
 
 VIZ_TOOLS = [
-    create_bar_chart, create_line_chart, create_scatter_map, create_risk_heatmap,
+    create_bar_chart, create_line_chart, create_scatter_map, create_risk_heatmap, create_choropleth_map, create_chart,
     # Include data tools so viz agent can query data if not already in context
     query_food_atlas, query_food_access, query_nass, query_weather,
     query_fema_disasters, query_census_acs, run_prediction,
@@ -81,7 +82,7 @@ ML_TOOLS = [
 ANALYTICS_TOOLS = [
     train_risk_model, predict_risk, train_crop_model, predict_crop_yield,
     get_feature_importance, detect_anomalies, web_search_risks,
-    build_feature_matrix, run_analytics_pipeline,
+    build_feature_matrix, run_analytics_pipeline, run_eda_pipeline,
     compute_evaluation_metrics, compare_scenarios, compute_ccc, explain_with_shap,
 ]
 
@@ -147,11 +148,15 @@ def _detect_category(plan: list[str], step: int) -> str:
     keywords: dict[str, list[str]] = {
         "analytics": ["train", "xgboost", "random forest", "feature importan",
                       "anomal", "shap", "analytics", "deep analysis", "pipeline",
-                      "build feature", "web search risk", "ccc", "concordance"],
+                      "build feature", "web search risk", "ccc", "concordance",
+                      "eda", "exploratory", "distribution", "correlation",
+                      "gradient boost", "composite risk", "vulnerability"],
         "data": ["food", "insecur", "atlas", "census", "fema", "disaster",
                  "weather", "nass", "crop", "yield", "poverty", "snap"],
         "viz":  ["chart", "bar", "line", "heatmap", "scatter", "map", "visual",
-                 "graph", "plot", "dashboard"],
+                 "graph", "plot", "dashboard", "pie", "histogram", "box plot",
+                 "violin", "area chart", "funnel", "treemap", "sunburst",
+                 "waterfall", "gauge", "bubble"],
         "route": ["route", "deliver", "schedule", "distance", "logistics",
                   "transport", "dispatch"],
         "ml":   ["predict", "risk", "scenario", "evaluat", "metric", "compare",
