@@ -441,7 +441,7 @@ function QueryTab({ onChartAdded }) {
                   {/* Inline charts */}
                   {msg.charts?.map((ch, j) => (
                     <div key={j} style={{ ...card, marginTop:8, borderRadius:12 }}>
-                      <p style={{ color:T.muted, fontSize:10.5, fontWeight:600, marginBottom:8 }}>{ch.plotly_spec?.layout?.title || `Chart ${j+1}`}</p>
+                      <p style={{ color:T.muted, fontSize:10.5, fontWeight:600, marginBottom:8 }}>{ch.plotly_spec?.layout?.title?.text || ch.title || `Chart ${j+1}`}</p>
                       <PlotlyChart spec={ch.plotly_spec} />
                     </div>
                   ))}
@@ -560,7 +560,7 @@ function DashboardTab({ sessionCharts }) {
             {sessionCharts.map((ch, i) => (
               <div key={i} style={card}>
                 <p style={{ color:T.sub, fontSize:12, fontWeight:600, marginBottom:8 }}>
-                  {ch.plotly_spec?.layout?.title || `Chart ${i+1}`}
+                  {ch.plotly_spec?.layout?.title?.text || ch.title || `Chart ${i+1}`}
                 </p>
                 <PlotlyChart spec={ch.plotly_spec} height={240} />
               </div>
