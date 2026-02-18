@@ -262,46 +262,14 @@ async def query_agent_stream(request: QueryRequest):
         yield f"data: {json.dumps({'type': 'status', 'message': 'Analyzing query...'})}\n\n"
 
         try:
-            # Run the graph with streaming events
-            seen_tools: set[str] = set()
-            result = None
+            # Run agent synchronously in a thread — this is the only reliable
+            # way to get the full final state (including chart ToolMessages).
+            # astream() state merging breaks in FastAPI's async generator context.
+            yield f"data: {json.dumps({'type': 'status', 'message': 'Processing query...'})}\n\n"
 
-            async for event in agent.astream_events(initial_state, version="v2"):
-                ename = event.get("event", "")
-                etype = event.get("name", "")
+            result = await asyncio.to_thread(agent.invoke, initial_state)
 
-                if ename == "on_chain_start" and etype == "planner":
-                    yield f"data: {json.dumps({'type': 'status', 'message': 'Planning approach...'})}\n\n"
-
-                elif ename == "on_chain_start" and etype == "router":
-                    yield f"data: {json.dumps({'type': 'status', 'message': 'Routing query...'})}\n\n"
-
-                elif ename == "on_chain_start" and etype == "tool_caller":
-                    yield f"data: {json.dumps({'type': 'status', 'message': 'Calling tools...'})}\n\n"
-
-                elif ename == "on_tool_start":
-                    tool_name = event.get("name", "unknown")
-                    if tool_name not in seen_tools:
-                        seen_tools.add(tool_name)
-                        yield f"data: {json.dumps({'type': 'tool_start', 'tool': tool_name})}\n\n"
-
-                elif ename == "on_tool_end":
-                    tool_name = event.get("name", "unknown")
-                    yield f"data: {json.dumps({'type': 'tool_end', 'tool': tool_name})}\n\n"
-
-                elif ename == "on_chain_start" and etype in ("synthesizer", "finalizer"):
-                    yield f"data: {json.dumps({'type': 'status', 'message': 'Synthesizing response...'})}\n\n"
-
-                elif ename == "on_chain_end" and etype in ("synthesizer", "finalizer"):
-                    output = event.get("data", {}).get("output", {})
-                    if isinstance(output, dict) and output.get("final_answer"):
-                        result = output
-
-            # Build final response from the last state
-            if result is None:
-                # Fallback: run synchronously
-                result = await asyncio.to_thread(agent.invoke, initial_state)
-
+            # Extract tool calls
             tool_calls = []
             for msg in result.get("messages", []):
                 if hasattr(msg, "tool_calls") and msg.tool_calls:
@@ -315,6 +283,14 @@ async def query_agent_stream(request: QueryRequest):
             if analytics_report and "charts" in analytics_report:
                 charts.extend(analytics_report.get("charts", []))
 
+            # Emit reasoning steps individually for progressive rendering
+            for step in result.get("reasoning_trace", []):
+                yield f"data: {json.dumps({'type': 'reasoning', 'step': step})}\n\n"
+
+            # Emit tool call events
+            for tc in tool_calls:
+                yield f"data: {json.dumps({'type': 'tool_end', 'tool': tc['tool']})}\n\n"
+
             response_data = {
                 "answer": final_answer,
                 "reasoning_trace": result.get("reasoning_trace", []),
@@ -322,10 +298,6 @@ async def query_agent_stream(request: QueryRequest):
                 "charts": charts,
                 "analytics_report": analytics_report,
             }
-
-            # Send reasoning steps individually
-            for step in result.get("reasoning_trace", []):
-                yield f"data: {json.dumps({'type': 'reasoning', 'step': step})}\n\n"
 
             yield f"data: {json.dumps({'type': 'answer', 'data': response_data})}\n\n"
 
