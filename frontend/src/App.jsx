@@ -237,11 +237,13 @@ function PlotlyChart({ spec, height = 280 }) {
   const ref = useRef(null)
   useEffect(() => {
     if (!ref.current || !window.Plotly || !spec) return
+    console.log('[PlotlyChart] rendering:', spec.data?.[0]?.type, 'traces:', spec.data?.length)
+    const chartHeight = spec.layout?.height || height
     const layout = {
       paper_bgcolor: 'transparent', plot_bgcolor: 'transparent',
       font: { color: T.sub, family: T.sans, size: 11 },
-      margin: { t: 20, r: 10, b: 40, l: 10 },
-      height,
+      margin: { t: 30, r: 10, b: 40, l: 50 },
+      height: chartHeight,
       ...spec.layout,
     }
     window.Plotly.newPlot(ref.current, spec.data || [], layout, {
@@ -250,7 +252,7 @@ function PlotlyChart({ spec, height = 280 }) {
     return () => window.Plotly?.purge(ref.current)
   }, [spec, height])
   if (!spec) return null
-  return <div ref={ref} style={{ width: '100%' }} />
+  return <div ref={ref} style={{ width: '100%', minHeight: spec.layout?.height || height }} />
 }
 
 // ─── ReasoningStep ──────────────────────────────────────────────────────────
@@ -358,6 +360,7 @@ function QueryTab({ onChartAdded }) {
           // Reasoning steps arrive in real-time (shown in final message)
         } else if (evt.type === 'answer') {
           const res = evt.data
+          console.log('[AgriFlow] answer received, charts:', res.charts?.length, res.charts?.map(c => c.chart_type))
           setMessages(prev => [...prev, { role:'agent', ...res }])
           if (res.charts?.length) onChartAdded(res.charts)
           setLoading(false)
