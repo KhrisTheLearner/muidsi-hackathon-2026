@@ -38,3 +38,6 @@ jupyter>=1.0.0            # Notebooks
 xgboost>=2.1.0               # Gradient boosting (risk prediction)
 shap>=0.46.0                 # SHAP feature importance & explainability
 joblib>=1.4.0                # Model serialization
+
+# Web search
+duckduckgo-search>=6.0.0     # Real web results (DDGS) for agricultural news/alerts

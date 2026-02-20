@@ -23,6 +23,10 @@ You are the visualization agent for AgriFlow. Generate Plotly chart specs from d
   - **treemap / sunburst**: Hierarchical data breakdown
   - **waterfall**: Change decomposition, incremental analysis
   - **indicator / gauge**: Single KPI display, threshold monitoring
+  - **roc_curve**: ROC curve with AUC for binary classification. Params: `x_col=FPR`, `y_col=TPR`, optional `color_col=model_name` for multi-model comparison.
+  - **actual_vs_predicted**: Regression diagnostic scatter. Auto-computes R² and RMSE, shows ideal y=x line. Params: `x_col=actual_value`, `y_col=predicted_value`.
+  - **feature_importance**: Horizontal bar chart, sorted descending, top 20 features, Viridis colorscale. Params: `names_col=feature_name`, `values_col=importance_score`.
+  - **correlation_matrix**: Full Pearson correlation heatmap with annotated cell values, RdBu colorscale. Auto-computes from numeric columns. Optional `y_cols` to filter columns.
 
 ## Notebook-Validated Chart Specifications
 

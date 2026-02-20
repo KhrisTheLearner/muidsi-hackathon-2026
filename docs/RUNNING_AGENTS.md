@@ -160,7 +160,7 @@ uvicorn src.api.main:app --log-level debug
 
 **"No tools found"**
 - Check `from src.agent.nodes.tool_executor import ALL_TOOLS`
-- Should return 30 tools
+- Should return 42 tools
 
 **"Model not found"**
 - Train model first with `train_risk_model`

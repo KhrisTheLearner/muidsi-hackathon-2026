@@ -148,11 +148,11 @@ def test_tool_categories():
         )
 
         categories = {
-            "data": (DATA_TOOLS, 7),
+            "data": (DATA_TOOLS, 9),
             "sql": (SQL_TOOLS, 2),
             "ml": (ML_TOOLS, 4),
-            "analytics": (ANALYTICS_TOOLS, 13),
-            "viz": (VIZ_TOOLS, 4),
+            "analytics": (ANALYTICS_TOOLS, 16),
+            "viz": (VIZ_TOOLS, 15),
             "route": (ROUTE_TOOLS, 4)
         }
 
@@ -166,7 +166,7 @@ def test_tool_categories():
                 all_pass = False
 
         print(f"\nTotal: {len(ALL_TOOLS)} unique tools")
-        return all_pass and len(ALL_TOOLS) == 30
+        return all_pass and len(ALL_TOOLS) == 42
 
     except Exception as e:
         print(f"[ERROR] {e}")

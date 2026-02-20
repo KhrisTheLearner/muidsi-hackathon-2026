@@ -87,7 +87,7 @@ _CHART_TOOLS = {
 }
 
 # Tools that return analytics reports with embedded charts
-_ANALYTICS_TOOLS = {"run_analytics_pipeline"}
+_ANALYTICS_TOOLS = {"run_analytics_pipeline", "train_risk_model"}
 
 # Session-scoped analytics report store
 _analytics_store: dict[str, dict] = {}

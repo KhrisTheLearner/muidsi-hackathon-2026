@@ -61,21 +61,31 @@ export MODEL_DIR=models
 
 | Category | Count | Model | Cost |
 |----------|-------|-------|------|
-| data | 7 | Haiku | Low |
+| data | 9 | Haiku | Low |
 | sql | 2 | Sonnet | High |
 | ml | 4 | Sonnet | High |
-| analytics | 13 | Sonnet | High |
-| viz | 4 | Haiku | Low |
+| analytics | 16 | Sonnet | High |
+| viz | 15 | Haiku | Low |
 | route | 4 | Haiku | Low |
+
+42 unique tools total (some overlap between groups for agent self-sufficiency).
 
 ## File Locations
 
 ```text
 src/agent/graph.py                 LangGraph workflow
-src/agent/tools/                   30 tool implementations
+src/agent/tools/                   42 tool implementations
 src/agent/nodes/tool_executor.py   Routing logic
 src/api/main.py                    REST API endpoints
-archia/setup_skills.py             Push skills to cloud
+archia/push_agents.sh              Sync agents to Archia cloud
+archia/deploy_archia_cloud.py      Full Archia deployment script
+archia/create_analytics_agent.py   Create/update analytics agent
+scripts/check_environment.py       Verify Python env + imports
+scripts/demo_autonomous_behavior.py  Interactive demo runner
+scripts/test_ml_pipeline.py        ML pipeline validation (7 sections)
+tests/test_analytics_agent.py      Archia agent call test
+tests/test_archia_integration.py   6-test integration suite
+tests/test_complete_pipeline.py    End-to-end pipeline test
 data/agriflow.db                   SQLite database
 models/                            Cached ML models
 ```

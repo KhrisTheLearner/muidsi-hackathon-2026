@@ -39,7 +39,10 @@ from src.agent.tools.chart_generator import (
 _DIRECT_PATTERNS: dict[str, re.Pattern] = {
     "data": re.compile(
         r"(food insecur|poverty|snap\b|food desert|food access|atlas|"
-        r"census|fema|disaster|acs\b|demograph)", re.I,
+        r"census|fema|disaster|acs\b|demograph|"
+        r"disease|pest\b|outbreak|news\b|alert\b|web search|\bsearch\b|"
+        r"tar spot|aphid|rootworm|avian flu|corn yield|soybean yield|"
+        r"nass|crop report|usda report)", re.I,
     ),
     "sql": re.compile(r"(list tables|show tables|schema|run sql|query database|sqlite)", re.I),
     "viz": re.compile(r"(chart|graph|plot|heatmap|scatter.?map|\bmap\b|visualiz|dashboard)", re.I),

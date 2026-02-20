@@ -2,6 +2,77 @@
 
 All notable changes to AgriFlow.
 
+## [2.1.0] - 2026-02-20
+
+### Added — Web Search, Choropleth Maps, Tract-Level ML, Data MCP
+
+#### Web Search Integration
+
+- **DuckDuckGo DDGS** — real web search replacing Wikipedia-only instant-answer API
+- `search_web` — general web search tool in DATA_TOOLS
+- `search_agricultural_news` — targeted agricultural news/threat search in DATA_TOOLS
+- `src/mcp_servers/data_server.py` — new FastMCP server exposing all live APIs + web search to Archia cloud agents (thin wrapper; business logic stays in `src/agent/tools/`)
+- Router expanded: `disease`, `pest`, `outbreak`, `news`, `alert`, `tar spot`, `aphid`, `rootworm`, `avian flu` patterns route to `[data]`
+- Synthetic tool call builder now auto-generates `search_agricultural_news` calls for disease/pest/news steps without waiting for LLM tool selection
+
+#### Visualization Enhancements
+
+- **Choropleth maps** — `create_choropleth_map` with FIPS code support and US county/state outlines
+- 4 new ML chart types in `create_chart`: `roc_curve`, `actual_vs_predicted`, `feature_importance`, `correlation_matrix`
+- **Chart validator node** — pure Python post-processing: fixes swapped axes, raw column names, FIPS formatting, empty traces (no LLM cost)
+
+#### Tract-Level ML Tools (NEW2 notebook methodology)
+
+- `build_tract_feature_matrix` — per-capita normalization, EHI/SII/AI vulnerability taxonomy for 72k US census tracts
+- `compute_food_insecurity_risk` — GBM SNAP prediction + composite risk score (validated: R2=0.9949, top tract 29510111300 St. Louis city, risk=0.959)
+- `run_eda_pipeline` — automated exploratory data analysis pipeline
+
+#### Ingest Tools (5 new)
+
+- `list_db_tables`, `fetch_and_profile_csv`, `load_dataset`, `run_eda_query`, `drop_table`
+
+### Updated
+
+- `src/agent/nodes/tool_executor.py` — DATA_TOOLS 7→9, VIZ_TOOLS 4→15, ANALYTICS_TOOLS 13→16; new INGEST_TOOLS group
+- `archia/agents/agriflow-data.toml` and `agriflow-system.toml` — added `agriflow-data` MCP grant for live API access
+- `archia/prompts/agriflow-data.md` — documented web search tools + DuckDuckGo citation format
+- `archia/prompts/agriflow-viz.md` — added 4 new ML chart types
+- `archia/prompts/agriflow-system.md` — added web search + new chart type guidance
+- `requirements.txt` — added `duckduckgo-search>=6.0.0`
+
+### Documentation Overhaul
+
+- **README.md** — complete rewrite for MUIDSI Hackathon 2026 GitHub publication; architecture diagram, ML methodology tables, 30+ tool inventory, all agent configs
+- **docs/NOTEBOOKS_TO_AGENT.md** — new traceability doc: Suyog/NEW1 2/NEW2/NEW2 1 notebooks → `ml_engine.py` → agent tools; includes exact formulas and validated results
+- **docs/AGRIFLOW_ARCHITECTURE.md** — complete rewrite: 9-node graph, routing logic, multi-agent table, all 42 tools, Archia agents, MCP servers, SSE streaming, React frontend
+- **docs/deprecated/** — archived 4 old docs: MASTERDOC.md, ARCHITECTURE.md, SETUP_AND_USAGE.md, TEAM_INSTRUCTIONS.md
+- **.gitignore** — added: server_log.txt, archia website docs, evaluations.jsonl, models artifacts, NUL, .claude/settings.local.json
+
+### Codebase Organization
+
+- `tests/` — test files moved here: `test_analytics_agent.py`, `test_archia_integration.py`, `test_complete_pipeline.py`
+- `archia/` — deployment scripts moved here: `create_analytics_agent.py`, `deploy_archia_cloud.py`
+- `scripts/` — diagnostic/utility scripts moved here: `check_environment.py`, `demo_autonomous_behavior.py`
+- `push_agents.sh` — root copy removed (canonical copy lives in `archia/push_agents.sh`)
+
+### Fixed
+
+- Stale tool counts in `tests/test_complete_pipeline.py` (data: 7→9, analytics: 13→16, viz: 4→15, ALL_TOOLS: 30→42)
+- `docs/QUICK_REFERENCE.md` and `docs/RUNNING_AGENTS.md` updated with correct counts and new file paths
+
+### Tool Count Summary (current)
+
+| Category | Count |
+| -------- | ----- |
+| data | 9 |
+| sql | 2 |
+| ml | 4 |
+| analytics | 16 |
+| viz | 15 |
+| route | 4 |
+| ingest | 5 |
+| **ALL_TOOLS (unique)** | **42** |
+
 ## [2.0.2] - 2026-02-16
 
 ### Documentation Reorganization
