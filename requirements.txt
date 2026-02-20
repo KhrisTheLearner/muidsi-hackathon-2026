@@ -1,0 +1,28 @@
+# Core data science
+pandas>=2.0.0
+numpy>=1.24.0
+scikit-learn>=1.3.0
+scipy>=1.11.0
+
+# Data loading
+openpyxl>=3.1.0          # Read Excel files (Food Environment Atlas)
+requests>=2.31.0          # NASS API calls
+
+# Visualization
+matplotlib>=3.7.0
+seaborn>=0.12.0
+plotly>=5.15.0
+
+# Agentic AI
+langchain>=0.1.0
+langchain-openai>=0.0.5
+openai>=1.12.0            # Archia uses OpenAI SDK syntax
+
+# Utilities
+python-dotenv>=1.0.0      # Load .env files
+tqdm>=4.65.0              # Progress bars
+jupyter>=1.0.0            # Notebooks
+
+# ML extras (add as needed)
+# xgboost>=2.0.0
+# lightgbm>=4.0.0
