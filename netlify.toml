@@ -1,0 +1,21 @@
+# AgriFlow — Netlify frontend deployment config
+# Frontend is a static Vite/React build.
+# Backend (FastAPI) runs separately on Hugging Face Spaces.
+#
+# Required env var (set in Netlify UI — NOT here):
+#   VITE_API_URL = https://YOUR-USERNAME-agriflow.hf.space
+
+[build]
+  base    = "frontend"
+  command = "npm install && npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# SPA fallback: all routes serve index.html
+# (AgriFlow doesn't use React Router but this is best practice for SPAs)
+[[redirects]]
+  from   = "/*"
+  to     = "/index.html"
+  status = 200

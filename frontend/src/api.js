@@ -1,7 +1,11 @@
-// AgriFlow API client — proxied through Vite dev server to http://localhost:8000
+// AgriFlow API client
+// Dev:  BASE = '' → Vite proxy forwards /api/* to localhost:8000
+// Prod: BASE = VITE_API_URL (e.g. https://user-agriflow.hf.space) set in Netlify
+
+const BASE = import.meta.env.VITE_API_URL || ''
 
 const call = (path, opts = {}) =>
-  fetch(path, opts).then(r => r.ok ? r.json() : Promise.reject(r))
+  fetch(BASE + path, opts).then(r => r.ok ? r.json() : Promise.reject(r))
 
 export const queryAgent = (query) =>
   call('/api/query', {
@@ -17,7 +21,7 @@ export const queryAgent = (query) =>
  * @returns {Promise<void>}
  */
 export async function queryAgentStream(query, onEvent) {
-  const res = await fetch('/api/query/stream', {
+  const res = await fetch(BASE + '/api/query/stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ query }),

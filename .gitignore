@@ -51,6 +51,7 @@ Thumbs.db
 # Node (frontend)
 frontend/node_modules/
 frontend/build/
+frontend/dist/
 frontend/.env
 
 # Logs
