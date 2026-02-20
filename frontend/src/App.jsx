@@ -4,7 +4,7 @@
  * Tabs: Query · Dashboard · Data Sources · Map & Alerts
  */
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { queryAgent, queryAgentStream, getHealth, getExamples, getCharts, getAnalytics, getEvalSummary } from './api'
+import { queryAgent, queryAgentStream, getHealth, getExamples, getCharts, getAnalytics, getEvalSummary, planRoute as planRouteApi } from './api'
 
 // ─── Theme ─────────────────────────────────────────────────────────────────
 const T = {
@@ -233,26 +233,56 @@ function inlineFormat(text) {
 }
 
 // ─── PlotlyChart ────────────────────────────────────────────────────────────
-function PlotlyChart({ spec, height = 280 }) {
+function PlotlyChart({ spec, height = 320 }) {
   const ref = useRef(null)
   useEffect(() => {
     if (!ref.current || !window.Plotly || !spec) return
     console.log('[PlotlyChart] rendering:', spec.data?.[0]?.type, 'traces:', spec.data?.length)
+
+    // spec.layout.height wins if set (e.g. maps=500px); fall back to prop
     const chartHeight = spec.layout?.height || height
+
+    // Map types need edge-to-edge layout
+    const isMap = ['scattermapbox', 'choroplethmapbox'].some(
+      t => spec.data?.some(d => d.type === t)
+    )
+    const defaultMargin = isMap
+      ? { t: 36, r: 0, b: 0, l: 0 }
+      : { t: 36, r: 16, b: 48, l: 56 }
+
     const layout = {
-      paper_bgcolor: 'transparent', plot_bgcolor: 'transparent',
+      paper_bgcolor: 'transparent',
+      plot_bgcolor: 'transparent',
       font: { color: T.sub, family: T.sans, size: 11 },
-      margin: { t: 30, r: 10, b: 40, l: 50 },
-      height: chartHeight,
+      margin: defaultMargin,
       ...spec.layout,
+      // height always wins last so it can't be overridden by spec to a smaller value
+      height: chartHeight,
     }
+
     window.Plotly.newPlot(ref.current, spec.data || [], layout, {
-      displayModeBar: false, responsive: true,
+      displayModeBar: false,
+      responsive: true,
+      scrollZoom: isMap,
     })
-    return () => window.Plotly?.purge(ref.current)
+
+    // Resize when container dimensions change (e.g. tab becomes visible, window resize)
+    const observer = new ResizeObserver(() => {
+      if (ref.current && window.Plotly) {
+        window.Plotly.Plots.resize(ref.current)
+      }
+    })
+    observer.observe(ref.current)
+
+    return () => {
+      observer.disconnect()
+      window.Plotly?.purge(ref.current)
+    }
   }, [spec, height])
+
   if (!spec) return null
-  return <div ref={ref} style={{ width: '100%', minHeight: spec.layout?.height || height }} />
+  const chartHeight = spec.layout?.height || height
+  return <div ref={ref} style={{ width: '100%', height: chartHeight }} />
 }
 
 // ─── ReasoningStep ──────────────────────────────────────────────────────────
@@ -443,8 +473,10 @@ function QueryTab({ onChartAdded }) {
                   </div>
                   {/* Inline charts */}
                   {msg.charts?.map((ch, j) => (
-                    <div key={j} style={{ ...card, marginTop:8, borderRadius:12 }}>
-                      <p style={{ color:T.muted, fontSize:10.5, fontWeight:600, marginBottom:8 }}>{ch.plotly_spec?.layout?.title?.text || ch.title || `Chart ${j+1}`}</p>
+                    <div key={j} style={{ ...card, marginTop:8, borderRadius:12, overflow:'hidden', padding:0 }}>
+                      <p style={{ color:T.muted, fontSize:10.5, fontWeight:600, padding:'10px 12px 6px' }}>
+                        {ch.plotly_spec?.layout?.title?.text || ch.title || `Chart ${j+1}`}
+                      </p>
                       <PlotlyChart spec={ch.plotly_spec} />
                     </div>
                   ))}
@@ -559,13 +591,13 @@ function DashboardTab({ sessionCharts }) {
       {sessionCharts.length > 0 && (
         <div>
           <p style={{ color:T.muted, fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:.8, marginBottom:12 }}>Session Charts</p>
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(440px,1fr))', gap:16 }}>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(460px,1fr))', gap:16 }}>
             {sessionCharts.map((ch, i) => (
               <div key={i} style={card}>
                 <p style={{ color:T.sub, fontSize:12, fontWeight:600, marginBottom:8 }}>
                   {ch.plotly_spec?.layout?.title?.text || ch.title || `Chart ${i+1}`}
                 </p>
-                <PlotlyChart spec={ch.plotly_spec} height={240} />
+                <PlotlyChart spec={ch.plotly_spec} />
               </div>
             ))}
           </div>
@@ -744,6 +776,8 @@ function AlertsTab({ onChartAdded }) {
   const [dests, setDests]               = useState('Wayne County, Pemiscot County, Dunklin County')
   const [routeResult, setRouteResult]   = useState(null)
   const [routeLoading, setRouteLoading] = useState(false)
+  const [directions, setDirections]     = useState([])
+  const [routeStats, setRouteStats]     = useState(null)
 
   const runAlert = async (alert) => {
     setAlertLoading(p => ({ ...p, [alert.id]: true }))
@@ -762,13 +796,30 @@ function AlertsTab({ onChartAdded }) {
     if (!origin || !dests.trim() || routeLoading) return
     setRouteLoading(true)
     setRouteResult(null)
+    setDirections([])
+    setRouteStats(null)
     try {
-      const q = `Plan an optimal delivery route from ${origin} to ${dests}. Show the route on a map and provide a delivery schedule starting at 08:00.`
-      const res = await queryAgent(q)
-      setRouteResult(res)
-      if (res.charts?.length) onChartAdded(res.charts)
-    } catch {
-      setRouteResult({ answer:'API unavailable.', charts:[] })
+      const data = await planRouteApi(origin, dests)
+      if (data.error) {
+        setRouteResult({ answer: `Error: ${data.error}`, charts: [] })
+        return
+      }
+      setRouteStats({
+        distance: data.total_distance_miles,
+        time: data.est_total_drive_minutes,
+        stops: data.total_stops,
+        method: data.method,
+      })
+      if (data.directions?.length) setDirections(data.directions)
+      if (data.plotly_spec) {
+        const chart = { chart_id: `route_${Date.now()}`, plotly_spec: data.plotly_spec }
+        setRouteResult({ answer: '', charts: [chart] })
+        onChartAdded([chart])
+      } else {
+        setRouteResult({ answer: 'Route calculated (map unavailable).', charts: [] })
+      }
+    } catch (err) {
+      setRouteResult({ answer: `Route planning failed: ${err.message}`, charts: [] })
     } finally {
       setRouteLoading(false)
     }
@@ -806,12 +857,58 @@ function AlertsTab({ onChartAdded }) {
           {routeLoading ? <><Ic.Spin color={T.sub} /> Optimizing...</> : '⟳ Optimize Route'}
         </button>
 
+        {routeStats && (
+          <div style={{ display:'flex', gap:10, flexWrap:'wrap', marginTop:14 }}>
+            {[
+              { label:'Distance', value:`${routeStats.distance} mi`, color:T.blue },
+              { label:'Drive Time', value:`${Math.floor(routeStats.time/60)}h ${routeStats.time%60}m`, color:T.green },
+              { label:'Stops', value:routeStats.stops, color:'#2dd4bf' },
+            ].map(s => (
+              <div key={s.label} style={{ ...card, flex:1, minWidth:90, textAlign:'center' }}>
+                <p style={{ color:T.muted, fontSize:10, fontWeight:600, textTransform:'uppercase', letterSpacing:.8, margin:'0 0 4px' }}>{s.label}</p>
+                <p style={{ color:s.color, fontSize:18, fontWeight:700, margin:0 }}>{s.value}</p>
+              </div>
+            ))}
+            <div style={{ ...card, flex:2, minWidth:170 }}>
+              <p style={{ color:T.muted, fontSize:10, fontWeight:600, textTransform:'uppercase', letterSpacing:.8, margin:'0 0 4px' }}>Source</p>
+              <p style={{ color: routeStats.method.includes('ORS') ? T.green : T.warn, fontSize:11.5, margin:0, fontWeight:600 }}>
+                {routeStats.method.includes('ORS') ? '✓ Real road routing (ORS)' : '⚠ Straight-line estimate'}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {directions.length > 0 && (
+          <div style={{ ...card, marginTop:12 }}>
+            <p style={{ color:T.muted, fontSize:10, fontWeight:600, textTransform:'uppercase', letterSpacing:.8, marginBottom:10 }}>
+              Turn-by-Turn Directions ({directions.length} steps)
+            </p>
+            <div style={{ maxHeight:240, overflowY:'auto' }}>
+              {directions.map((step, i) => {
+                const icons = { 0:'↰', 1:'↱', 2:'⬅', 3:'➡', 4:'↑', 5:'⟳' }
+                const icon = icons[step.type] ?? '▸'
+                return (
+                  <div key={i} style={{ display:'flex', gap:8, padding:'6px 0', borderBottom:`1px solid ${T.border}`, alignItems:'flex-start' }}>
+                    <span style={{ color:'#2dd4bf', fontSize:14, flexShrink:0, width:18, textAlign:'center' }}>{icon}</span>
+                    <span style={{ flex:1, fontSize:12, color:T.text, lineHeight:1.4 }}>{step.instruction}</span>
+                    <span style={{ fontSize:10.5, color:T.muted, flexShrink:0, textAlign:'right', minWidth:72 }}>
+                      {step.distance_miles} mi<br/>{step.duration_minutes} min
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
         {routeResult && (
-          <div style={{ marginTop:16 }}>
-            <p style={{ color:T.text, fontSize:12.5, lineHeight:1.6, whiteSpace:'pre-wrap', marginBottom:12 }}>{routeResult.answer}</p>
+          <div style={{ marginTop:12 }}>
+            {routeResult.answer && (
+              <p style={{ color:T.text, fontSize:12.5, lineHeight:1.6, whiteSpace:'pre-wrap', marginBottom:12 }}>{routeResult.answer}</p>
+            )}
             {routeResult.charts?.map((ch, i) => (
               <div key={i} style={{ marginTop:8 }}>
-                <PlotlyChart spec={ch.plotly_spec} height={320} />
+                <PlotlyChart spec={ch.plotly_spec} height={380} />
               </div>
             ))}
           </div>

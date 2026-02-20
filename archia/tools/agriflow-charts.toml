@@ -3,7 +3,7 @@
 
 identifier = "agriflow-charts"
 name = "AgriFlow Chart & Map Generator"
-description = "Generate Plotly bar charts, line charts, scatter maps, and risk heatmaps with dark theme for food distribution dashboards"
+description = "Generate Plotly bar charts, line charts, scatter maps, choropleth county maps, risk heatmaps, and generic charts with dark theme for food distribution dashboards"
 provider = "AgriFlow"
 version = "1.0.0"
 type = "mcp"

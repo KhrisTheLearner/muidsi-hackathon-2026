@@ -12,6 +12,8 @@ from mcp.server.fastmcp import FastMCP
 
 from src.agent.tools.ml_engine import (
     build_feature_matrix as _build,
+    build_tract_feature_matrix as _build_tract,
+    compute_food_insecurity_risk as _tract_risk,
     detect_anomalies as _anomalies,
     get_feature_importance as _importance,
     predict_risk as _predict,
@@ -48,7 +50,7 @@ def train_and_predict(
 def train_risk_model(
     state: str = "MO",
     model_type: str = "xgboost",
-    target_col: str = "FOODINSEC_15_17",
+    target_col: str = "FOODINSEC_21_23",
 ):
     """Train an XGBoost or Random Forest risk prediction model."""
     return _train.invoke({
@@ -94,8 +96,30 @@ def search_agricultural_risks(query: str, region: str = "Missouri"):
 
 @mcp.tool()
 def build_features(state: str = "MO"):
-    """Build ML-ready feature matrix from all data sources."""
+    """Build ML-ready county feature matrix from all data sources."""
     return _build.invoke({"state": state})
+
+
+@mcp.tool()
+def build_tract_features(state: str = ""):
+    """Build census-tract feature matrix with per-capita normalization and 3D vulnerability indices.
+
+    Implements NEW2 notebook methodology: SNAP_rate, HUNV_rate, demographic %,
+    Economic Hardship Index (EHI), Structural Inequality Index (SII), Aging Index (AI),
+    and LILA access binary indicators. Filters Pop2010 < 50.
+    """
+    return _build_tract.invoke({"state": state})
+
+
+@mcp.tool()
+def compute_tract_risk(state: str = "", top_n: int = 20):
+    """Compute Food Insecurity Risk scores for census tracts using GBM predictions.
+
+    Trains GBM (n=500, lr=0.05, depth=4) on SNAP_rate, then computes:
+    Food_Insecurity_Risk = (EHI_norm + Pred_SNAP_norm) / 2 ∈ [0, 1]
+    Returns top-N most vulnerable tracts ranked by composite risk.
+    """
+    return _tract_risk.invoke({"state": state, "top_n": top_n})
 
 
 if __name__ == "__main__":

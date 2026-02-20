@@ -43,6 +43,7 @@ def _get_openai_client() -> OpenAI:
         base_url=ARCHIA_BASE_URL,
         api_key="not-used",
         default_headers={"Authorization": f"Bearer {ARCHIA_TOKEN}"},
+        timeout=60.0,  # 60s max — prevents hanging on Archia 504s
     )
 
 
@@ -129,13 +130,31 @@ class ArchiaChatModel(BaseChatModel):
 
 
 def _messages_to_input(messages: list[BaseMessage]) -> list[dict]:
-    """Convert LangChain messages to Archia Responses API input format."""
-    items = []
+    """Convert LangChain messages to Archia Responses API input format.
+
+    NOTE: The Archia API hangs when the "developer" role is used. We work around
+    this by injecting system message content as a prefix in the first user message.
+    """
+    # Extract system message content first
+    system_content = ""
+    non_system = []
     for msg in messages:
         if isinstance(msg, SystemMessage):
-            items.append({"role": "developer", "content": msg.content})
-        elif isinstance(msg, HumanMessage):
-            items.append({"role": "user", "content": msg.content})
+            system_content = msg.content
+        else:
+            non_system.append(msg)
+
+    items = []
+    first_user_done = False
+    for msg in non_system:
+        if isinstance(msg, HumanMessage):
+            if not first_user_done and system_content:
+                # Prepend system context into the first user message
+                content = f"[System instructions]\n{system_content}\n\n[User query]\n{msg.content}"
+                first_user_done = True
+            else:
+                content = msg.content
+            items.append({"role": "user", "content": content})
         elif isinstance(msg, AIMessage):
             if msg.tool_calls:
                 # Reconstruct function call outputs
