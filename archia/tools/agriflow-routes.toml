@@ -1,0 +1,14 @@
+# AgriFlow Routes MCP Tool
+# Delivery route optimization, mapping, and scheduling for Missouri
+
+identifier = "agriflow-routes"
+name = "AgriFlow Route Optimizer"
+description = "Nearest-neighbor TSP delivery routing, interactive route maps, and time-based delivery scheduling across 22 Missouri locations"
+provider = "AgriFlow"
+version = "1.0.0"
+type = "mcp"
+
+[local]
+cmd = "python"
+args = ["-m", "src.mcp_servers.route_server"]
+timeout_secs = 30

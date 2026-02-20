@@ -1,0 +1,14 @@
+# AgriFlow System - primary orchestrator with full MCP access
+name = "agriflow-system"
+model_name = "priv-claude-sonnet-4-5-20250929"
+enabled = true
+description = "Primary AgriFlow orchestrator: SQL analytics, ML pipelines, chart generation, and route planning"
+system_prompt_file = "agriflow-system.md"
+can_manage_agents = true
+
+[mcp_tools]
+agriflow-sqlite = null   # Full SQL access: USDA, Census, FEMA, agricultural datasets
+agriflow-ml = null       # Full ML suite: training, prediction, SHAP, anomaly detection
+agriflow-charts = null   # Chart/map generation for dashboards
+agriflow-routes = null   # Delivery route optimization and scheduling
+agriflow-data = null     # Live API access: NASS, FEMA, Census ACS, weather, web search

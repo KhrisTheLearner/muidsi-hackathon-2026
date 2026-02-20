@@ -1,0 +1,14 @@
+# AgriFlow Charts MCP Tool
+# Generates Plotly JSON specs for the React frontend (dark theme)
+
+identifier = "agriflow-charts"
+name = "AgriFlow Chart & Map Generator"
+description = "Generate Plotly bar charts, line charts, scatter maps, choropleth county maps, risk heatmaps, and generic charts with dark theme for food distribution dashboards"
+provider = "AgriFlow"
+version = "1.0.0"
+type = "mcp"
+
+[local]
+cmd = "python"
+args = ["-m", "src.mcp_servers.chart_server"]
+timeout_secs = 30
