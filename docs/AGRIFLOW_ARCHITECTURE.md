@@ -1,41 +1,36 @@
-# AgriFlow Architecture Guide
+# AgriFlow System Architecture
 
-AgriFlow is an agentic AI system for food distribution planning in Missouri. It combines a LangGraph multi-step reasoning pipeline with Archia cloud agents, an MCP tool layer, a FastAPI backend, and a React frontend.
+AgriFlow is a multi-agent AI system for food supply chain intelligence. This document describes the complete system design: the LangGraph orchestration graph, LLM routing strategy, tool inventory, Archia cloud agent configuration, MCP server layer, FastAPI backend, and React frontend.
 
 ---
 
 ## System Overview
 
 ```
-User Query
-    |
-    v
-React Frontend (port 5173)
-    |  SSE stream
-    v
+User (Browser, port 5173)
+         |
+         | HTTP / SSE stream
+         v
 FastAPI Backend (port 8000)
-    |  /api/query/stream
-    v
-LangGraph StateGraph (9 nodes)
-    |
-    +-- router (pure Python, no LLM)
-    |       |
-    |   single-category? --> tool_caller --> tools --> chart_validator --> finalizer
-    |   multi-step?      --> planner --> tool_caller --> ... --> synthesizer
-    |
-    v
-Tool Layer (16 analytics tools + viz + route tools)
-    |
-    +-- USDA Food Environment Atlas (SQLite)
-    +-- USDA Food Access Atlas      (SQLite)
-    +-- USDA NASS Quick Stats API
-    +-- FEMA Disaster Declarations  (SQLite)
-    +-- US Census ACS               (SQLite)
-    +-- Open-Meteo Weather API
-    +-- ML Engine (sklearn, XGBoost, SHAP)
-    +-- Chart Generator (Plotly)
-    +-- Route Optimizer
-    +-- Web Search (DuckDuckGo)
+  /api/query/stream  -- Server-Sent Events (progressive rendering)
+  /api/query         -- Synchronous JSON response
+  /api/route         -- Direct route optimization
+  /api/health        -- System status
+         |
+         v
+LangGraph StateGraph  [src/agent/graph.py]
+  9 nodes, pure Python edges, no LLM cost for routing
+         |
+         v
+Tool Layer  [src/agent/tools/]
+  30+ tools across 7 categories
+         |
+    +----+----+----+----+----+----+
+    |    |    |    |    |    |    |
+  USDA NASS FEMA ACS WX DDG  ML  Chart Route
+         |
+Archia Cloud Agents (8 agents)
+  MCP servers expose tools to cloud agents
 ```
 
 ---
@@ -48,483 +43,440 @@ Tool Layer (16 analytics tools + viz + route tools)
 START
   |
   v
-[router]  ---- regex match (no LLM) ----
-  |                                      |
-  | multi-category query                 | single-category query
-  v                                      |
-[planner]                                |
-  |                                      |
-  v                                      |
+[router]  --- pure Python regex, no LLM ---
+  |                                       |
+  | multi-category query                  | single-category query
+  v                                       |
+[planner]  (Haiku)                        |
+  |                                       |
+  v                                       v
 [tool_caller] <--------------------------+
   |
-  +-- has tool_calls? ----------> [tools] --> back to tool_caller
+  +-- has tool_calls? --> [tools]  (ToolNode)
+  |                           |
+  |                      back to tool_caller
   |
-  +-- more plan steps? ---------> [advance_step]
-  |                                      |
-  |                          [viz] step? | other step?
-  |                               |      |
-  |                        [direct_viz]  |
-  |                               |      |
-  |                               +------+
-  |                                      |
-  +-- substantive answer? -----> [finalizer] --> END
+  +-- more plan steps? --> [advance_step] --> [tool_caller]
+  |
+  +-- direct viz step? --> [direct_viz] --> [advance_step]
+  |
+  +-- substantive answer? --> [finalizer] --> END
   |
   v
 [chart_validator]  (pure Python, no LLM)
   |
   v
-[synthesizer] --> END
+[synthesizer]  (Sonnet)
+  |
+  v
+END
+```
+
+### State Definition (`src/agent/state.py`)
+
+```python
+class AgriFlowState(TypedDict):
+    messages: list           # Conversation history (HumanMessage, AIMessage, ToolMessage)
+    plan: list[str]          # Decomposed plan steps (e.g. ["[data] ...", "[viz] ..."])
+    current_step: int        # Index into plan
+    tool_results: dict       # Accumulated tool outputs by tool name
+    reasoning_trace: list    # Human-readable reasoning log
+    charts: list             # Extracted Plotly chart specs
+    final_answer: str | None # Synthesized answer string
 ```
 
 ### Node Descriptions
 
-| Node | Role | LLM? |
-| ---- | ---- | ---- |
-| `router` | Regex-based query classification — skips planner for simple queries | No |
-| `planner` | Decomposes complex queries into categorized plan steps `[data]`, `[viz]`, `[analytics]`, etc. | Yes (Haiku) |
-| `tool_caller` | Executes the current plan step by calling tools | Yes (Sonnet) |
-| `tools` | LangGraph ToolNode — runs all 16+ registered tools | No (direct call) |
-| `advance_step` | Increments `current_step` counter for multi-step plans | No |
-| `direct_viz` | Programmatically calls chart tools for `[viz]` steps without LLM | No |
-| `chart_validator` | Fixes Plotly specs: swapped axes, raw column names, bad FIPS, empty traces | No |
-| `synthesizer` | Synthesizes tool results into a final markdown answer | Yes (Sonnet) |
-| `finalizer` | Skips synthesizer when tool_caller already produced a complete answer | No |
+| Node | Type | Model | Purpose |
+|------|------|-------|---------|
+| `router` | Pure Python | None | Regex-classifies query into 8 categories. Single-category: fast-track. Multi-category: send to planner. |
+| `planner` | LLM | Haiku | Decomposes query into categorized plan steps: `[data]`, `[viz]`, `[analytics]`, `[ml]`, `[route]`, `[sql]`, `[ingest]`. 45s timeout with fallback. |
+| `tool_caller` | LLM + Synthetic | Sonnet/Haiku | Executes the current plan step. Routes to specialized agent (Haiku for data/viz/route, Sonnet for analytics/sql). Uses **synthetic tool call builder** to bypass LLM timeout. |
+| `tools` | ToolNode | None | LangGraph prebuilt ToolNode. Executes tool calls from `tool_caller`, appends ToolMessages to state. |
+| `advance_step` | Pure Python | None | Increments `current_step` counter. Routes to `direct_viz` for `[viz]` steps or back to `tool_caller`. |
+| `direct_viz` | Pure Python | None | Programmatically calls chart tools without LLM. Extracts chart parameters from tool results in state. More reliable than LLM-based chart generation. |
+| `chart_validator` | Pure Python | None | Validates and fixes Plotly specs: swapped axes, raw column names, bad FIPS codes, empty traces. Zero LLM cost. |
+| `synthesizer` | LLM | Sonnet | Synthesizes all tool results and reasoning into a final markdown answer with citations. |
+| `finalizer` | Pure Python | None | Skips synthesizer when `tool_caller` already produced a complete answer (e.g. simple data lookup). |
 
-### AgriFlowState Schema
+---
+
+## Smart Router
+
+The router (`_router_node` in `graph.py`) uses compiled regex patterns — no LLM, no latency:
 
 ```python
-{
-    "messages":       list[BaseMessage],   # Full conversation history
-    "plan":           list[str],           # ["[data] ...", "[viz] ...", ...]
-    "current_step":   int,                 # Which plan step we're on
-    "tool_results":   dict[str, Any],      # Accumulated tool outputs
-    "reasoning_trace": list[str],          # Debugging log of node decisions
-    "charts":         list[dict],          # Extracted chart specs
-    "final_answer":   str | None,          # Final synthesized response
+_DIRECT_PATTERNS = {
+    "data":      r"(food insecur|poverty|snap|food desert|census|fema|disaster|"
+                 r"disease|pest|outbreak|news|alert|web search|nass|crop report)",
+    "sql":       r"(list tables|show tables|schema|run sql|query database)",
+    "viz":       r"(chart|graph|plot|heatmap|scatter.?map|map|visualiz|dashboard)",
+    "route":     r"(route|deliver|schedule|logistics|transport|dispatch)",
+    "weather":   r"(weather|forecast|temperature|rain|drought|precipitation)",
+    "ingest":    r"(load|import|ingest|profile|eda|add.*dataset|download.*data)",
+    "analytics": r"(train.*model|xgboost|random forest|shap|feature importan|"
+                 r"anomal|analytics|risk model|predict.*risk)",
+    "ml":        r"(predict|scenario|evaluation|compare.*scenario)",
 }
 ```
 
-### Smart Router Categories
+**If exactly one category matches**: skip planner, build a 1-step plan `[{cat}] {query}` — saves 1-3 s.
 
-The router uses `re.compile` patterns to classify queries without any LLM call:
+**If viz matches alone**: build a 2-step plan `[data] ... / [viz] ...` — ensures data is fetched first.
 
-| Category | Patterns |
-| -------- | -------- |
-| `data` | food insecurity, poverty, SNAP, food desert, census, FEMA |
-| `sql` | list tables, schema, run sql, query database |
-| `viz` | chart, graph, heatmap, map, visualize, dashboard |
-| `route` | route, deliver, schedule, logistics, dispatch |
-| `weather` | weather, forecast, rain, drought, precipitation |
-| `ingest` | load, import, ingest, EDA, add dataset |
-| `analytics` | train model, XGBoost, Random Forest, SHAP, risk model |
-| `ml` | predict, scenario, evaluation, compare scenario |
-
-Single-category queries skip the planner entirely. Viz queries get a 2-step plan: `[data] + [viz]`.
+**If multiple match**: send to planner for full decomposition.
 
 ---
 
-## LLM Configuration
+## Multi-Agent Routing (tool_executor.py)
 
-| Role | Model | Model ID |
-| ---- | ----- | -------- |
-| Complex analysis (tool_caller, synthesizer) | Claude Sonnet 4.5 | `priv-claude-sonnet-4-5-20250929` |
-| Light tasks (planner) | Claude Haiku 4.5 | `priv-claude-haiku-4-5-20251001` |
+Each plan step category uses a different model + minimal tool set:
 
-**ArchiaChatModel** (`src/agent/llm.py`): A custom `BaseChatModel` that wraps Archia's Responses API (not Chat Completions). System prompts are injected as a prefix on the first user message (the "developer" role causes hanging). Tool calls use `input_schema` format.
+| Category | Model | Tool Count | Purpose |
+|----------|-------|------------|---------|
+| `data` | Haiku (DATA_MODEL) | 9 | USDA, Census, FEMA, weather, web search |
+| `viz` | Haiku (VIZ_MODEL) | 15 | Charts + data tools for self-sufficiency |
+| `route` | Haiku (LOGISTICS_MODEL) | 4 | Delivery route optimization |
+| `ml` | Sonnet (ML_MODEL) | 4 | Model evaluation only |
+| `analytics` | Sonnet (ML_MODEL) | 12 | Full ML pipeline |
+| `sql` | Sonnet (SQL_MODEL) | 2 | Database queries |
+| `ingest` | Haiku (DATA_MODEL) | 5 | Dataset loading/profiling |
+| `general` | Sonnet (SQL_MODEL) | all | Fallback for unclassified steps |
+
+### Synthetic Tool Call Builder
+
+The Archia API can time out when tools are bound to LLM requests. For tagged steps (`[data]`, `[analytics]`, `[route]`, `[sql]`), AgriFlow uses a **synthetic tool call builder** that bypasses the LLM entirely:
+
+1. Parse keywords from the plan step text
+2. Construct tool call dicts (name, args, id) directly from keyword rules
+3. Return an `AIMessage` with `tool_calls` — same interface as LLM-generated calls
+
+Example: a step containing "disease" or "pest" automatically generates a `search_agricultural_news` call. A step containing "corn" or "yield" generates a `query_nass` call.
+
+This makes data and analytics steps deterministic and ~3x faster than LLM-based tool selection.
 
 ---
 
-## Data Sources
+## Tool Inventory
 
-| Source | Data | Access Method |
-| ------ | ---- | ------------- |
-| USDA Food Environment Atlas | County-level food insecurity, SNAP, poverty, obesity, store counts | SQLite (`food_environment` table) |
-| USDA Food Access Atlas | Census-tract LILA classifications, vehicle access, demographics | SQLite (`food_access` table) |
-| USDA NASS Quick Stats | County crop production, yields, acreage | REST API |
-| FEMA Disaster Declarations | Historical floods, droughts, storms by county | SQLite (`fema_disasters` table) |
-| US Census ACS | Demographics, income, unemployment | SQLite (`acs_data` table) |
-| Open-Meteo | Current weather and forecasts | REST API |
-| DuckDuckGo | Agricultural threats, pest/disease alerts | Web search API |
+### [data] — Data Retrieval (9 tools)
 
-**Database**: `data/agriflow.db` (SQLite). Path configurable via `DB_PATH` env var.
+| Tool | Source | Free? |
+|------|--------|-------|
+| `query_food_atlas` | USDA Food Environment Atlas (SQLite) | Yes |
+| `query_food_access` | USDA Food Access Research Atlas (SQLite) | Yes |
+| `query_nass` | USDA NASS Quick Stats API | API key |
+| `query_weather` | Open-Meteo API | Yes |
+| `query_fema_disasters` | FEMA Disaster Declarations API | Yes |
+| `query_census_acs` | US Census ACS API | Yes |
+| `run_prediction` | Local heuristic/ML model | Yes |
+| `search_web` | DuckDuckGo DDGS | Yes |
+| `search_agricultural_news` | DuckDuckGo DDGS (ag-context) | Yes |
 
----
+### [analytics] — ML Pipeline (12 tools)
 
-## Tool Inventory (16 Analytics + Viz + Route)
+| Tool | Purpose |
+|------|---------|
+| `build_feature_matrix` | Merge food atlas + census + derived features (115 MO counties x 38 features) |
+| `build_tract_feature_matrix` | Build per-capita normalized tract features (72k+ tracts, EHI/SII/AI) |
+| `train_risk_model` | Train XGBoost/GBM/RF on county data. Returns R2, RMSE, MAE, CCC, AUC + 3 charts |
+| `predict_risk` | Load cached model, run inference under scenarios (drought, price_shock, baseline) |
+| `get_feature_importance` | SHAP TreeExplainer global + per-sample feature importance |
+| `detect_anomalies` | Isolation Forest outlier detection on county indicators |
+| `compute_food_insecurity_risk` | End-to-end tract risk scorer (EHI + GBM SNAP prediction) |
+| `run_analytics_pipeline` | Full pipeline: EDA + training in parallel. Supports full_analysis, quick_predict, risk_scan |
+| `run_eda_pipeline` | Automated EDA: descriptive stats, distributions, correlations, outlier detection + charts |
+| `web_search_risks` | DuckDuckGo DDGS search for agricultural threats (upgraded from instant-answer API) |
+| `train_crop_model` | Crop dependency risk model (delegates to train_risk_model with crop features) |
+| `predict_crop_yield` | Crop yield impact under scenarios |
 
-### Analytics Tools (registered in `tool_executor.py`)
-
-| Tool | Description |
-| ---- | ----------- |
-| `query_food_atlas` | County-level food insecurity, SNAP, poverty from USDA Atlas |
-| `query_food_access` | Census-tract LILA food desert classifications |
-| `query_nass_crops` | Crop yields, production, acreage from USDA NASS API |
-| `query_fema_disasters` | Historical disaster declarations by county |
-| `query_census_acs` | Demographics, income, unemployment from Census ACS |
-| `get_weather_forecast` | Current conditions and forecast from Open-Meteo |
-| `list_tables` | List SQLite database tables |
-| `describe_table` | Get column schema for a table |
-| `execute_sql` | Run arbitrary SQL on the local database |
-| `build_feature_matrix` | County-level ML feature matrix (38 cols, Suyog + NEW1 methodology) |
-| `build_tract_feature_matrix` | Census-tract feature matrix with EHI/SII/AI indices (NEW2 methodology) |
-| `train_risk_model` | Train county risk model (GBM/RF/SVR/LinearReg/XGBoost) |
-| `predict_risk` | Generate county-level risk predictions from trained model |
-| `get_feature_importance` | SHAP feature importance for trained model |
-| `detect_anomalies` | Isolation Forest anomaly detection on county data |
-| `compute_food_insecurity_risk` | Census-tract composite risk score (NEW2 formula) |
-| `web_search_risks` | DuckDuckGo search for agricultural threats |
-
-### Visualization Tools
+### [viz] — Visualization (6 tools)
 
 | Tool | Chart Types |
-| ---- | ----------- |
-| `create_bar_chart` | Horizontal/vertical bar charts for rankings |
-| `create_line_chart` | Time series and trend charts |
-| `create_scatter_map` | Geographic scatter maps (lat/lon) |
-| `create_risk_heatmap` | County-vs-factor risk matrices |
-| `create_choropleth_map` | County-level geographic heatmaps (FIPS codes) |
-| `create_chart` | Universal Plotly chart (scatter, pie, histogram, box, violin, area, funnel, treemap, sunburst, waterfall, indicator) |
+|------|-------------|
+| `create_bar_chart` | Horizontal/vertical bar, rankings |
+| `create_line_chart` | Time series, trends |
+| `create_scatter_map` | Geographic scatter (lat/lon) |
+| `create_risk_heatmap` | County x factor risk matrices |
+| `create_choropleth_map` | County-level geographic heatmap (FIPS-based) |
+| `create_chart` | Universal: scatter, pie, histogram, box, violin, area, funnel, treemap, sunburst, waterfall, indicator, roc_curve, actual_vs_predicted, feature_importance, correlation_matrix |
 
-### Route Tools
+### [route] — Logistics (4 tools)
 
-| Tool | Description |
-| ---- | ----------- |
-| `optimize_delivery_route` | TSP route optimization between Missouri distribution points |
-| `create_route_map` | Visualize delivery route on a map |
-| `schedule_deliveries` | Time-based delivery schedule from a route |
+`optimize_delivery_route` (TSP), `calculate_distance` (haversine + ORS), `create_route_map` (Plotly map), `schedule_deliveries`
 
----
+### [sql] — Database (2 tools)
 
-## ML Analytics Pipeline
+`list_tables`, `run_sql_query` (read-only, SELECT/WITH/PRAGMA only)
 
-### County-Level (Suyog / NEW1 2 Methodology)
+### [ml] — Evaluation (4 tools)
 
-Validated against Suyog.ipynb and NEW1 2.ipynb notebooks.
+`compute_evaluation_metrics` (RMSE, MAE, R2, CCC, F1), `compare_scenarios`, `compute_ccc`, `explain_with_shap`
 
-**1. Feature Matrix** (`build_feature_matrix`)
-- 115 Missouri counties
-- 38 features: food insecurity rates, poverty, SNAP participation, WIC, food access, store counts, interaction features
+### [ingest] — Data Ingestion (5 tools)
 
-**2. Interaction Features** (auto-computed in `build_feature_matrix`)
-- `POVxSNAP = POVRATE21 * PCT_SNAP22 / 100`
-- `POVxLACCESS = POVRATE21 * PCT_LACCESS_HHNV19 / 100`
-- `FOODxSNAP = FOODINSEC_21_23 * PCT_SNAP22 / 100`
-- `SNAPxLACCESS = PCT_SNAP22 * PCT_LACCESS_HHNV19 / 100`
-
-**3. K-Means Clustering** (k=3, StandardScaler)
-- Cluster 0: Medium-risk (POVRATE21 ~16.7%)
-- Cluster 1: Low-risk (POVRATE21 ~12.6%)
-- Cluster 2: High-risk (POVRATE21 ~19.1%)
-
-**4. Model Types** (selectable via `model_type` parameter)
-
-| Model | Hyperparameters | Notebook R² |
-| ----- | --------------- | ----------- |
-| `gradient_boosting` | n=300, lr=0.05, depth=3 | R²=0.998, RMSE=0.099 |
-| `linear_regression` | baseline | R²=0.983, RMSE=0.328, MAE=0.049 |
-| `random_forest` | n=200, depth=15, n_jobs=-1 | R²=0.987 |
-| `svr` | RBF kernel, C=10, eps=0.1 | R²=0.912 |
-| `xgboost` | n=100, depth=5, lr=0.1 | R²>0.98 |
-
-Note: SVR uses a `Pipeline([StandardScaler, SVR])` internally — do not pre-scale features.
-
-**5. Composite Risk Score** (Suyog 6-Feature Method)
-
-```
-Features: FOODINSEC_18_20, FOODINSEC_21_23, POVRATE21,
-          PCT_SNAP22, PCT_WICWOMEN16, PCT_LACCESS_HHNV19
-
-MinMaxNorm each feature to [0, 1]
-Composite_Risk_Score = mean(normalized features)
-Risk_Category = percentile cut at 33rd/66th (Low / Medium / High)
-```
-
-**Top Predictive Features** (from SHAP analysis):
-1. `PCT_WICWOMEN16` (~65%): WIC women participation — strongest predictor
-2. `VLFOODSEC_21_23` (~22%): Historical extreme food insecurity
-3. `PCT_SNAP22` (~top 5): Direct economic hardship
-4. Interaction terms: `POVxSNAP`, `POVxLACCESS`, `FOODxSNAP`, `SNAPxLACCESS`
-
-### Census-Tract Level (NEW2 Methodology)
-
-Validated against NEW2.ipynb notebook. 72,242 tracts nationally, 1,387 for Missouri.
-
-**Feature Engineering** (`build_tract_feature_matrix`)
-- Per-capita normalization: `SNAP_rate = TractSNAP / Pop2010`
-- Economic Hardship Index (EHI): `SNAP_rate + HUNV_rate`
-- Structural Inequality Index (SII): `Black_pct + Hispanic_pct - White_pct`
-- Aging Index (AI): `Senior_pct`
-- LILA binary features: Urban, LILATracts_1And10, LILATracts_halfAnd10, LILATracts_1And20, LILATracts_Vehicle
-- Filters: Pop2010 >= 50
-
-**Composite Food Insecurity Risk** (`compute_food_insecurity_risk`)
-```
-GBM(n=500, lr=0.05, depth=4) → Predicted_SNAP_rate  (R²=0.9949)
-EHI_norm       = MinMaxScale(Economic_Hardship_Index)
-Pred_SNAP_norm = MinMaxScale(Predicted_SNAP_rate)
-Food_Insecurity_Risk = (EHI_norm + Pred_SNAP_norm) / 2  ∈ [0, 1]
-```
-
-**Top High-Risk Missouri Tracts** (from validation run):
-1. Tract 29510111300 — St. Louis city — risk=0.959
-2. Tract 29510125700 — St. Louis city — risk=0.945
-3. Tract 29095005801 — Jackson County  — risk=0.939
+`list_db_tables`, `fetch_and_profile_csv`, `load_dataset`, `run_eda_query`, `drop_table`
 
 ---
 
-## Archia Cloud Agents (9 Agents)
+## LLM Configuration (`src/agent/llm.py`)
 
-Archia is the cloud agent platform. Agents receive queries via the Responses API and can call MCP tools registered to them.
+### ArchiaChatModel
 
-**Base URL**: `https://registry.archia.app`
-**Auth**: `Authorization: Bearer $ARCHIA_TOKEN`
+AgriFlow uses a custom `ArchiaChatModel` — a LangChain `BaseChatModel` subclass that wraps the **Archia Responses API** (not the Chat Completions API):
 
-| Agent | Model | Description |
-| ----- | ----- | ----------- |
-| `agriflow-system` | Sonnet 4.5 | Primary analyst with ODBC SQL access |
-| `agriflow-analytics` | Sonnet 4.5 | ML prediction, SHAP, anomaly detection, analytics pipelines |
-| `agriflow-viz` | Haiku 4.5 | Plotly chart and map generation |
-| `agriflow-data` | Haiku 4.5 | Fast data fetcher (USDA, Census, FEMA, weather) |
-| `agriflow-logistics` | Haiku 4.5 | Route optimization and delivery scheduling |
-| `agriflow-planner` | Haiku 4.5 | Query decomposition into sub-tasks |
-| `agriflow-ingest` | Haiku 4.5 | Data ingestion, profiling, and EDA |
-| `agriflow-evaluator` | Haiku 4.5 | Response quality evaluation and improvement |
-| `agriflow-ml` | *(disabled)* | Merged into agriflow-analytics |
-
-**Agent Config Files**: `archia/agents/*.toml`
-**Agent Prompts**: `archia/prompts/*.md`
-
-**Sync prompts to Archia**:
-```bash
-export ARCHIA_TOKEN=your_token
-bash push_agents.sh
-bash push_agents.sh --dry-run  # preview without making API calls
 ```
+POST https://registry.archia.app/v1/responses
+Authorization: Bearer {ARCHIA_TOKEN}
+{
+  "model": "priv-claude-sonnet-4-5-20250929",
+  "input": [...messages...],
+  "tools": [...tool schemas...]
+}
+```
+
+This enables Archia's cloud routing, logging, and agent management while still using Claude models.
+
+### Model Assignment
+
+| Role | Model ID | Used For |
+|------|----------|----------|
+| `SONNET` | `priv-claude-sonnet-4-5-20250929` | Complex reasoning, analytics, synthesis |
+| `HAIKU` | `priv-claude-haiku-4-5-20251001` | Fast tasks: data fetch, chart gen, routing |
+| `DATA_MODEL` | Haiku | Data retrieval steps |
+| `VIZ_MODEL` | Haiku | Chart generation steps |
+| `LOGISTICS_MODEL` | Haiku | Route optimization steps |
+| `ML_MODEL` | Sonnet | ML training and analytics |
+| `SQL_MODEL` | Sonnet | SQL queries and general fallback |
+
+### Timeout Protection
+
+All LLM calls are wrapped with a 30-60 second timeout using `threading.Thread` + `queue.Queue`. On timeout, the node returns an empty `AIMessage("")` and the synthetic tool call builder generates the required tool calls.
 
 ---
 
-## MCP Servers (4 Servers)
+## Archia Cloud Agents
 
-MCP (Model Context Protocol) servers expose local tools to Archia cloud agents via stdio.
+8 agents are configured in `archia/agents/*.toml` and deployed via `push_agents.sh`:
 
-| Server | File | Tools Exposed |
-| ------ | ---- | ------------- |
-| SQLite | `src/mcp_servers/sqlite_server.py` | list_tables, describe_table, get_schema, execute_sql |
-| Chart | `src/mcp_servers/chart_server.py` | create_bar_chart, create_line_chart, create_scatter_map, create_risk_heatmap, create_choropleth_map, create_chart |
-| Route | `src/mcp_servers/route_server.py` | optimize_delivery_route, create_route_map, schedule_deliveries |
-| ML | `src/mcp_servers/ml_server.py` | train_and_predict, train_risk_model, predict_risk, explain_predictions, detect_anomalies, search_agricultural_risks, build_features, build_tract_features, compute_tract_risk |
+| Agent | TOML | Model | MCP Tools |
+|-------|------|-------|-----------|
+| `agriflow-system` | agriflow-system.toml | Sonnet | sqlite, ml, charts, routes, data |
+| `agriflow-analytics` | agriflow-analytics.toml | Sonnet | ml, sqlite |
+| `agriflow-data` | agriflow-data.toml | Haiku | sqlite, data |
+| `agriflow-viz` | agriflow-viz.toml | Haiku | charts, sqlite |
+| `agriflow-logistics` | agriflow-logistics.toml | Haiku | routes |
+| `agriflow-planner` | agriflow-planner.toml | Haiku | (none — text only) |
+| `agriflow-ingest` | agriflow-ingest.toml | Haiku | sqlite |
+| `agriflow-evaluator` | agriflow-evaluator.toml | Haiku | (none — text only) |
 
-**Run MCP server standalone** (for Cursor/Claude Desktop):
-```bash
-python -m src.mcp_servers.ml_server
-```
+Each agent has a corresponding system prompt in `archia/prompts/{name}.md` that describes its available tools, workflow, and rules.
 
 ---
 
-## FastAPI Backend
+## MCP Servers (`src/mcp_servers/`)
 
-**File**: `src/api/main.py`
-**Port**: 8000
-**Start**: `uvicorn src.api.main:app --reload --port 8000`
+Five FastMCP servers expose AgriFlow tools to Archia cloud agents and any MCP client (Claude Desktop, Cursor):
 
-### Endpoints
+| Server | Archia Name | Tools | Run Command |
+|--------|-------------|-------|-------------|
+| `ml_server.py` | `agriflow-ml` | 9 ML tools | `python -m src.mcp_servers.ml_server` |
+| `chart_server.py` | `agriflow-charts` | 6 chart tools | `python -m src.mcp_servers.chart_server` |
+| `sqlite_server.py` | `agriflow-sqlite` | 2 SQL tools | `python -m src.mcp_servers.sqlite_server` |
+| `route_server.py` | `agriflow-routes` | 4 route tools | `python -m src.mcp_servers.route_server` |
+| `data_server.py` | `agriflow-data` | 8 data + search tools | `python -m src.mcp_servers.data_server` |
 
-| Endpoint | Method | Description |
-| -------- | ------ | ----------- |
-| `/api/query/stream` | POST | SSE streaming query execution |
-| `/api/query` | POST | Synchronous query (non-streaming) |
-| `/api/health` | GET | Health check |
-| `/api/evaluations` | GET | Retrieve evaluation log |
+MCP servers are thin wrappers — all business logic lives in `src/agent/tools/` (single source of truth).
 
-### SSE Streaming Protocol
+---
 
-The `/api/query/stream` endpoint emits these event types:
+## FastAPI Backend (`src/api/main.py`)
+
+### Key Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/query/stream` | SSE streaming — emits `status`, `reasoning`, `tool_end`, `answer` events |
+| POST | `/api/query` | Synchronous JSON response with 10-min response cache |
+| POST | `/api/route` | Direct route optimization (bypasses LangGraph, ~3s) |
+| GET | `/api/health` | Model, API key status, tool inventory |
+| GET | `/api/charts` | List session Plotly charts |
+| GET | `/api/charts/{id}` | Retrieve chart by ID |
+| GET | `/api/eval/summary` | Heuristic quality scores across recent queries |
+| GET | `/api/examples` | Example queries for the frontend |
+
+### SSE Streaming Design
+
+The streaming endpoint runs the LangGraph agent in a background thread (not async) to get the full final state (including chart ToolMessages). A keepalive ping is sent every 5 seconds to prevent SSE connection timeout:
 
 ```
-event: status      data: {"status": "thinking", "message": "..."}
-event: reasoning   data: {"reasoning": [...]}
-event: chart       data: {"chart_id": "...", "plotly_spec": {...}}
-event: complete    data: {"answer": "...", "charts": [...]}
-event: error       data: {"error": "..."}
+data: {"type": "status", "message": "Analyzing query..."}
+: keepalive
+: keepalive
+data: {"type": "reasoning", "step": "Router: fast-track [data] (skipped planner)"}
+data: {"type": "tool_end", "tool": "query_food_atlas"}
+data: {"type": "answer", "data": {...full response...}}
 ```
 
 ### Response Cache
 
-Identical queries (normalized) are cached for 10 minutes to avoid redundant LLM and tool calls.
+A 10-minute in-memory cache (keyed by MD5 of normalized query) returns instant responses for repeated identical queries. Cache misses trigger full LangGraph execution.
+
+### Chart Extraction
+
+After agent execution, `_extract_charts()` scans all ToolMessages for chart-tool results and extracts Plotly specs. Charts are stored in a session-scoped `_chart_store` dict and embedded in the response `charts` array.
 
 ---
 
-## React Frontend
+## React Frontend (`frontend/src/`)
 
-**Directory**: `frontend/`
-**Port**: 5173 (Vite dev), built to `frontend/dist/`
-**Start**: `npm run dev` from `frontend/`
-**Build**: `npx vite build` from `frontend/`
+### Architecture
 
-### Key Features
+Single-page app with 4 tabs (Query, Dashboard, Data, Map):
 
-- SSE streaming display (reasoning trace + final answer appear progressively)
-- Collapsible markdown sections for long responses
-- Plotly chart rendering (charts received via SSE)
-- Dark theme with CSS variables
+- **Query tab**: SSE streaming display with collapsible reasoning trace, tool badges, markdown answer, inline charts
+- **Dashboard tab**: Grid of all session charts
+- **Data tab**: Raw tool results as formatted JSON
+- **Map tab**: Route visualization (reserved for logistics queries)
 
-**Vite proxy** (`frontend/vite.config.js`): Proxies `/api` to `http://localhost:8000` in development.
+### Key Components
 
----
+**PlotlyChart**: Uses `ResizeObserver` to call `Plotly.Plots.resize()` on container size change. This fixes 0-width charts in hidden tabs (Plotly renders at 0 width when `display:none`; tab activation changes width, ResizeObserver catches it).
 
-## Environment Setup
+**SSE Client** (`api.js`): EventSource connection to `/api/query/stream`. Accumulates `reasoning` events for progressive display and renders `answer` event as the final response.
 
-### Required
+### Vite Proxy
 
-```bash
-# Archia API token (for cloud agents + push_agents.sh)
-ARCHIA_TOKEN=your_token_here
-```
+`vite.config.js` proxies `/api` requests to `http://localhost:8000` during development, so the frontend can call the backend without CORS issues:
 
-### Optional
-
-```bash
-# Database path (default: data/agriflow.db)
-DB_PATH=data/agriflow.db
-
-# Model cache directory (default: models/)
-MODEL_DIR=models/
-
-# USDA NASS API key (optional — some endpoints work without it)
-NASS_API_KEY=your_key
-```
-
-### `.env` File
-
-Create a `.env` file in the project root. It is loaded automatically by FastAPI at startup:
-
-```
-ARCHIA_TOKEN=your_token
-DB_PATH=data/agriflow.db
+```javascript
+server: {
+  proxy: {
+    '/api': { target: 'http://localhost:8000', changeOrigin: true }
+  }
+}
 ```
 
 ---
 
-## File Structure
+## Chart Validator (`src/agent/nodes/chart_validator.py`)
+
+Pure Python node — no LLM cost. Fixes common Plotly spec issues from LLM-generated charts:
+
+| Problem | Fix |
+|---------|-----|
+| Swapped x/y axes | Detect if x contains county names when it should be numeric; swap |
+| Raw column names | Map FIPS, County, POVRATE21 etc. to display-friendly labels |
+| Bad FIPS codes | Zero-pad to 5 digits (e.g. "1001" -> "01001") |
+| Empty traces | Remove traces with no data; return error if all empty |
+| Missing layout | Add dark theme defaults: paper_bgcolor, plot_bgcolor, font color |
+
+---
+
+## Data Flow: Example Query
+
+Query: *"Which Missouri counties have the highest poverty and what's their food insecurity?"*
 
 ```
-muidsi-hackathon-2026/
-├── src/
-│   ├── agent/
-│   │   ├── graph.py              # LangGraph StateGraph (9 nodes)
-│   │   ├── llm.py                # ArchiaChatModel (Responses API wrapper)
-│   │   ├── state.py              # AgriFlowState TypedDict
-│   │   ├── nodes/
-│   │   │   ├── planner.py        # Query decomposition
-│   │   │   ├── tool_executor.py  # tool_caller_node, ALL_TOOLS registry
-│   │   │   ├── synthesizer.py    # Final answer synthesis
-│   │   │   ├── chart_validator.py # Pure Python chart spec fixer
-│   │   │   └── analytics_supervisor.py  # run_analytics_pipeline
-│   │   ├── tools/
-│   │   │   ├── ml_engine.py      # All ML tools (county + tract)
-│   │   │   ├── chart_generator.py # Plotly chart tools
-│   │   │   ├── food_atlas.py     # USDA Food Atlas queries
-│   │   │   ├── food_access.py    # USDA Food Access Atlas
-│   │   │   ├── nass.py           # USDA NASS API
-│   │   │   ├── fema.py           # FEMA disaster data
-│   │   │   ├── weather.py        # Open-Meteo weather
-│   │   │   ├── route_optimizer.py # Route optimization
-│   │   │   └── evaluator.py      # Response quality scoring
-│   │   └── prompts/
-│   │       └── system.py         # 4 prompts: AGRIFLOW_SYSTEM, PLANNER, SYNTHESIZER, RESPONDER
-│   ├── api/
-│   │   └── main.py               # FastAPI + SSE streaming
-│   └── mcp_servers/
-│       ├── sqlite_server.py      # SQLite MCP server
-│       ├── chart_server.py       # Chart MCP server
-│       ├── route_server.py       # Route MCP server
-│       └── ml_server.py          # ML MCP server (8 tools)
-├── archia/
-│   ├── agents/                   # Agent TOML configs (name, model, prompt_file)
-│   └── prompts/                  # Agent system prompt Markdown files
-├── frontend/                     # React + Vite frontend
-├── data/
-│   └── agriflow.db               # SQLite database
-├── models/                       # Trained model pkl files (auto-created)
-├── notebooks/                    # Research notebooks (Suyog, NEW1, NEW2)
-├── docs/                         # Documentation
-├── scripts/
-│   └── test_ml_pipeline.py       # ML pipeline validation script
-└── push_agents.sh                # Archia agent prompt sync script
+1. Router
+   - Matches "poverty" and "food insecur" -> category: [data]
+   - Single category -> fast-track, skip planner
+   - Plan: ["[data] Which Missouri counties have the highest poverty and what's their food insecurity?"]
+
+2. tool_caller (step 1: [data])
+   - Synthetic tool call builder detects "poverty" + "food insecur"
+   - Builds: query_food_atlas(state="MO", limit=200)
+   - Returns AIMessage(tool_calls=[{name:"query_food_atlas", args:{...}}])
+
+3. tools (ToolNode)
+   - Executes query_food_atlas
+   - Queries SQLite: SELECT FIPS, County, POVRATE21, FOODINSEC_21_23 FROM food_environment WHERE State='MO'
+   - Returns ToolMessage with 115 rows as JSON
+
+4. tool_caller (coming_from_tools=True)
+   - Plan complete (step 0 of 1 done)
+   - Returns AIMessage("") to trigger finalizer
+
+5. finalizer
+   - tool_msg_count > 0 AND final_answer is None -> goes to chart_validator
+
+6. chart_validator
+   - No chart specs in this response -> pass through
+
+7. synthesizer
+   - Reads ToolMessage with 115 county rows
+   - Identifies top counties by POVRATE21
+   - Generates markdown answer with data table and citations
+   - Sets final_answer
+
+8. FastAPI
+   - Emits SSE "answer" event with full response
+   - Frontend renders markdown + county table
 ```
 
 ---
 
-## Testing
+## Deployment Modes
 
-### ML Pipeline Validation
-
-Run the Suyog/NEW2 methodology validation against local data:
+### 1. Local Python (Development)
 
 ```bash
-cd muidsi-hackathon-2026
-python scripts/test_ml_pipeline.py
-
-# Options:
-python scripts/test_ml_pipeline.py --model gradient_boosting --state MO
-python scripts/test_ml_pipeline.py --model random_forest --state IL
+python run_agent.py
 ```
 
-**What it validates**:
-1. County feature matrix loads (115 Missouri counties, 38 features)
-2. 4 interaction features created (POVxSNAP, POVxLACCESS, FOODxSNAP, SNAPxLACCESS)
-3. K-Means forms exactly 3 clusters
-4. County model R² exceeds threshold (GBM >= 0.95, LinReg >= 0.90)
-5. Risk prediction scores are in valid range
-6. 6-feature composite risk score (Suyog) is in [0, 1]
-7. Risk categories include Low / Medium / High
-8. Census-tract pipeline loads 1,387+ MO tracts
-9. Tract risk scores are in [0, 1]
+Runs LangGraph directly, prints reasoning trace and answer to terminal.
 
-**Note on county food insecurity columns**: `FOODINSEC_21_23` and `PCT_SNAP22` are state-level aggregates in the USDA Atlas (same value for all counties in a state). The test script auto-selects `POVRATE21` (county-level) as the model target when the preferred column has zero variance.
-
-### MCP Tool Verification
+### 2. FastAPI + React (Full Stack)
 
 ```bash
-python -c "from src.mcp_servers.ml_server import mcp; print([t.name for t in mcp.list_tools()])"
-# Expected: ['train_and_predict', 'train_risk_model', 'predict_risk',
-#            'explain_predictions', 'detect_anomalies', 'search_agricultural_risks',
-#            'build_features', 'build_tract_features', 'compute_tract_risk']
-```
-
-### Archia Agent Sync
-
-```bash
-export ARCHIA_TOKEN=your_token
-bash push_agents.sh --dry-run  # preview
-bash push_agents.sh             # sync all enabled agents
-```
-
-### Full System Test
-
-```bash
-# 1. Start backend
+# Terminal 1
 uvicorn src.api.main:app --reload --port 8000
 
-# 2. Start frontend (separate terminal)
+# Terminal 2
 cd frontend && npm run dev
-
-# 3. Test via curl
-curl -X POST http://localhost:8000/api/query \
-  -H "Content-Type: application/json" \
-  -d '{"query": "Which Missouri counties have the highest food insecurity rates?"}'
+# Open http://localhost:5173
 ```
+
+### 3. Archia Cloud
+
+```bash
+# Deploy agents and tools
+bash push_agents.sh
+
+# Query via Archia console
+# https://console.archia.app
+```
+
+### 4. Hybrid (Recommended for Hackathon)
+
+Archia console for the web UI + local FastAPI + LangGraph for tool execution. Best of both: collaborative web interface + full ML/data access.
 
 ---
 
-## Known Limitations
+## Security Notes
 
-1. **State-level food insecurity data**: `FOODINSEC_21_23` is a state-level aggregate in the USDA Food Atlas — all counties in Missouri share the same value (12.7%). County-level variation comes from `POVRATE21`, `PCT_LACCESS_HHNV19`, and `PCT_WICWOMEN16`.
+- `.env` is git-ignored — never commit API keys
+- `ARCHIA_TOKEN` and `NASS_API_KEY` must be set before running
+- SQLite is read-only for query tools (only `run_sql_query` with SELECT/WITH/PRAGMA allowed)
+- CORS is open (`allow_origins=["*"]`) — restrict in production
+- Ingest tools (`drop_table`, `load_dataset`) require explicit invocation, not triggered by normal queries
 
-2. **ARCHIA_TOKEN required**: Cloud agents and `push_agents.sh` require the token. The local LangGraph agent works without it.
+---
 
-3. **Feature importance caching**: `get_feature_importance` requires a model to have been trained in the same session (models/ directory). Call `train_risk_model` first.
+## File Reference
 
-4. **Windows console encoding**: Some Unicode characters in terminal output may be replaced on Windows. Functionality is not affected.
-
-5. **Web search dependency**: `web_search_risks` uses DuckDuckGo Instant Answers API. Rate-limited for high-frequency use.
+| File | Lines | Purpose |
+|------|-------|---------|
+| `src/agent/graph.py` | ~200 | LangGraph 9-node StateGraph, router patterns, graph topology |
+| `src/agent/llm.py` | ~200 | ArchiaChatModel, model constants, timeout wrappers |
+| `src/agent/state.py` | ~30 | AgriFlowState TypedDict |
+| `src/agent/nodes/planner.py` | ~100 | Query decomposition with timeout + fallback |
+| `src/agent/nodes/tool_executor.py` | ~600 | Multi-agent routing, synthetic tool calls, LLM routing |
+| `src/agent/nodes/synthesizer.py` | ~100 | Final answer synthesis |
+| `src/agent/nodes/chart_validator.py` | ~150 | Pure Python Plotly spec fixing |
+| `src/agent/nodes/analytics_supervisor.py` | ~200 | ML pipeline orchestration |
+| `src/agent/prompts/system.py` | ~200 | 4 system prompts with visualization guide |
+| `src/agent/tools/ml_engine.py` | ~600 | All ML tools (XGBoost, SHAP, anomaly, tract risk) |
+| `src/agent/tools/chart_generator.py` | ~400 | All Plotly chart tools (12+ types) |
+| `src/api/main.py` | ~440 | FastAPI with SSE, cache, chart extraction |
+| `frontend/src/App.jsx` | ~800 | React UI with ResizeObserver, SSE streaming |

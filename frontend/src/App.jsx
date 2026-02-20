@@ -792,6 +792,11 @@ function AlertsTab({ onChartAdded }) {
     }
   }
 
+  // Auto-load all alert panels on mount
+  useEffect(() => {
+    ALERT_QUERIES.forEach(alert => runAlert(alert))
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   const planRoute = async () => {
     if (!origin || !dests.trim() || routeLoading) return
     setRouteLoading(true)
@@ -932,13 +937,17 @@ function AlertsTab({ onChartAdded }) {
           </div>
 
           {alertResults[alert.id] ? (
-            <div>
-              <p style={{ color:T.sub, fontSize:12.5, lineHeight:1.65, whiteSpace:'pre-wrap' }}>{alertResults[alert.id].answer}</p>
+            <div style={{ fontSize:13, lineHeight:1.65, color:T.text }}>
+              <Md text={alertResults[alert.id].answer} />
               {alertResults[alert.id].charts?.map((ch, i) => (
                 <div key={i} style={{ marginTop:10 }}>
                   <PlotlyChart spec={ch.plotly_spec} height={260} />
                 </div>
               ))}
+            </div>
+          ) : alertLoading[alert.id] ? (
+            <div style={{ display:'flex', alignItems:'center', gap:8, color:T.muted, fontSize:12, fontStyle:'italic' }}>
+              <Ic.Spin color={alert.color} /> Loading live data...
             </div>
           ) : (
             <p style={{ color:T.muted, fontSize:12, fontStyle:'italic' }}>Click Refresh to fetch live data via the AgriFlow agent.</p>
