@@ -12,6 +12,8 @@
 
 Frontend hosted on Netlify. Backend (FastAPI + LangGraph + 32 tools) running on Hugging Face Spaces with 16 GB RAM.
 
+**[AgriFlow U.S. Food Environment Atlas Dashboard](https://rshiny.dsa.missouri.edu/students/sspnp6/ShinyApps/DATA-SCI-8310/Hackathon/)** — Interactive R Shiny dashboard exploring the USDA Food Environment Atlas data.
+
 ---
 
 ## What It Does
