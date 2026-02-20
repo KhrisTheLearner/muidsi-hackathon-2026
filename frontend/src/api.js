@@ -52,3 +52,10 @@ export const getExamples = () => call('/api/examples')
 export const getCharts   = () => call('/api/charts')
 export const getAnalytics = () => call('/api/analytics')
 export const getEvalSummary = () => call('/api/eval/summary')
+
+export const planRoute = (origin, destinations) =>
+  call('/api/route', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ origin, destinations }),
+  })

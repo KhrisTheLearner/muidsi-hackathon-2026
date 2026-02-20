@@ -125,27 +125,122 @@ def _verify_subagent(
     return results
 
 
-def _viz_subagent(predictions: list[dict], state: str) -> list[dict]:
-    """Subagent 5: Generate Plotly charts from predictions."""
-    from src.agent.tools.chart_generator import create_bar_chart, create_scatter_map
+def _eda_subagent(state: str, target_col: str) -> dict[str, Any]:
+    """Subagent 5a: Run automated EDA pipeline in parallel with modeling."""
+    from src.agent.tools.ml_engine import run_eda_pipeline
+
+    eda_result = run_eda_pipeline.invoke({
+        "table_name": "food_environment",
+        "state": state,
+        "target_col": target_col,
+        "top_n_features": 10,
+    })
+    return eda_result if isinstance(eda_result, dict) else {"error": "EDA failed"}
+
+
+def _viz_subagent(predictions: list[dict], state: str, verify: dict | None = None) -> list[dict]:
+    """Subagent 5b: Generate notebook-style Plotly charts from predictions."""
+    from src.agent.tools.chart_generator import create_bar_chart, create_chart, create_choropleth_map
 
     charts = []
 
-    # Bar chart of top risk counties
-    if predictions and "error" not in predictions[0]:
-        bar = create_bar_chart.invoke({
-            "title": f"Top At-Risk Counties — {state}",
-            "data_json": json.dumps(predictions[:15]),
-            "x_col": "county",
-            "y_col": "predicted_risk" if "predicted_risk" in predictions[0] else "risk_score",
-            "color_col": "",
-            "horizontal": True,
-        })
-        if isinstance(bar, dict) and "plotly_spec" in bar:
-            charts.append(bar)
+    if not predictions or (predictions and "error" in predictions[0]):
+        return charts
 
-    # Scatter map (only if lat/lon available — skip if not)
-    # The chart tools handle missing columns gracefully
+    y_key = "predicted_risk" if "predicted_risk" in predictions[0] else "risk_score"
+
+    # Chart 1: Horizontal bar — top at-risk counties (NEW1/NEW2 style)
+    bar = create_bar_chart.invoke({
+        "title": f"Top At-Risk Counties — {state}",
+        "data_json": json.dumps(predictions[:15]),
+        "x_col": "county",
+        "y_col": y_key,
+        "color_col": y_key,
+        "horizontal": True,
+    })
+    if isinstance(bar, dict) and "plotly_spec" in bar:
+        charts.append(bar)
+
+    # Chart 2: Box plot of risk score distribution
+    box = create_chart.invoke({
+        "chart_type": "box",
+        "title": f"Risk Score Distribution — {state}",
+        "data_json": json.dumps(predictions[:50]),
+        "y_col": y_key,
+    })
+    if isinstance(box, dict) and "plotly_spec" in box:
+        charts.append(box)
+
+    # Chart 3: Histogram of risk scores (NEW1 composite risk distribution)
+    hist = create_chart.invoke({
+        "chart_type": "histogram",
+        "title": f"Distribution of Predicted Risk Scores — {state}",
+        "data_json": json.dumps(predictions),
+        "x_col": y_key,
+        "nbins": 20,
+    })
+    if isinstance(hist, dict) and "plotly_spec" in hist:
+        charts.append(hist)
+
+    # Chart 4: Choropleth map if FIPS codes available (NEW1 national vulnerability map style)
+    has_fips = any(p.get("fips") for p in predictions[:5])
+    if has_fips:
+        choro_data = [
+            {"fips": str(p.get("fips", "")).zfill(5), y_key: p.get(y_key, 0), "county": p.get("county", "")}
+            for p in predictions if p.get("fips")
+        ]
+        choro = create_choropleth_map.invoke({
+            "title": f"County Risk Map — {state} (Red = High Risk)",
+            "data_json": json.dumps(choro_data),
+            "fips_col": "fips",
+            "value_col": y_key,
+            "text_col": "county",
+            "colorscale": "RdYlGn_r",
+        })
+        if isinstance(choro, dict) and "plotly_spec" in choro:
+            charts.append(choro)
+
+    # Chart 5: Feature importance bar chart (NEW1/NEW2 style)
+    if verify and isinstance(verify, dict):
+        fi = verify.get("feature_importance", {})
+        if isinstance(fi, dict) and fi.get("top_features"):
+            fi_data = [
+                {"feature": f["feature"], "importance": f["importance"]}
+                for f in fi["top_features"][:15]
+            ]
+            fi_chart = create_bar_chart.invoke({
+                "title": f"Top Risk Drivers — SHAP Feature Importance ({state})",
+                "data_json": json.dumps(fi_data),
+                "x_col": "feature",
+                "y_col": "importance",
+                "color_col": "importance",
+                "horizontal": True,
+            })
+            if isinstance(fi_chart, dict) and "plotly_spec" in fi_chart:
+                charts.append(fi_chart)
+
+    # Chart 6: Scatter — predicted vs CI interval (confidence bands)
+    has_ci = any(p.get("ci_lower") is not None for p in predictions[:5])
+    if has_ci:
+        scatter_data = [
+            {
+                "county": p.get("county", ""),
+                y_key: p.get(y_key, 0),
+                "ci_lower": p.get("ci_lower", 0),
+                "ci_upper": p.get("ci_upper", 0),
+            }
+            for p in predictions[:20]
+        ]
+        scatter = create_chart.invoke({
+            "chart_type": "scatter",
+            "title": f"Predicted Risk with 95% CI — {state}",
+            "data_json": json.dumps(scatter_data),
+            "x_col": "county",
+            "y_col": y_key,
+            "text_col": "county",
+        })
+        if isinstance(scatter, dict) and "plotly_spec" in scatter:
+            charts.append(scatter)
 
     return charts
 
@@ -158,6 +253,7 @@ def _analysis_subagent(
     web_research: list,
     scenario: str,
     state: str,
+    eda: dict | None = None,
 ) -> str:
     """Subagent 6: Synthesize a narrative analysis from all results.
 
@@ -165,6 +261,20 @@ def _analysis_subagent(
     reformat this with an LLM for final presentation.
     """
     lines = [f"## Analytics Report — {state} ({scenario} scenario)\n"]
+
+    # EDA summary
+    if eda and eda.get("n_rows"):
+        lines.append("### Exploratory Data Analysis")
+        lines.append(f"- Dataset: {eda['n_rows']} rows × {eda['n_cols']} columns")
+        lines.append(f"- Missing data: {eda.get('missing_pct', 0)}%")
+        if eda.get("recommendations"):
+            for rec in eda["recommendations"]:
+                lines.append(f"- {rec}")
+        if eda.get("target_correlations"):
+            lines.append("\n**Top correlations with target:**")
+            for tc in eda["target_correlations"][:5]:
+                lines.append(f"  - {tc['feature']}: r={tc['correlation']}")
+        lines.append("")
 
     # Model performance
     if metrics:
@@ -285,11 +395,34 @@ def run_analytics_pipeline(
     analytics_report["n_features"] = data["n_features"]
     sources.extend(data.get("sources", []))
 
-    # ── Phase 2: ML training + prediction (sequential, needs data) ──
-    ml = _ml_subagent(state, model_type, target_col, scenario, yield_reduction_pct, top_n)
+    # ── Phase 2: EDA + ML training in PARALLEL ─────────────────
+    eda_result: dict[str, Any] = {}
+    ml: dict[str, Any] = {}
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        ml_fut = pool.submit(
+            _ml_subagent, state, model_type, target_col, scenario,
+            yield_reduction_pct, top_n,
+        )
+        if pipeline in ("full_analysis",):
+            eda_fut = pool.submit(_eda_subagent, state, target_col)
+        else:
+            eda_fut = None
+
+        try:
+            ml = ml_fut.result(timeout=120)
+        except Exception as e:
+            ml = {"error": str(e), "predictions": [], "model_info": {}}
+
+        if eda_fut is not None:
+            try:
+                eda_result = eda_fut.result(timeout=60)
+            except Exception:
+                eda_result = {}
+
     if "error" in ml:
         analytics_report["error"] = ml["error"]
         analytics_report["sources"] = sources
+        analytics_report["eda"] = eda_result
         return analytics_report
 
     analytics_report["predictions"] = ml["predictions"]
@@ -300,17 +433,30 @@ def run_analytics_pipeline(
         "n_features": ml["model_info"].get("n_features", 0),
         "model_path": ml["model_info"].get("model_path", ""),
     }
+    analytics_report["eda"] = {
+        "n_rows": eda_result.get("n_rows", 0),
+        "n_cols": eda_result.get("n_cols", 0),
+        "missing_pct": eda_result.get("missing_values", {}).get("total_pct", 0),
+        "distributions": eda_result.get("distributions", {}),
+        "top_correlations": eda_result.get("correlations", {}).get("top_pairs", [])[:5],
+        "target_correlations": eda_result.get("target_correlations", [])[:5],
+        "outliers": eda_result.get("outliers", {}),
+        "recommendations": eda_result.get("recommendations", []),
+    }
     sources.extend(ml.get("sources", []))
+    if eda_result:
+        sources.append("Automated EDA pipeline")
 
     # ── Phase 3: Verification + Visualization in PARALLEL ──────
     verify = {}
     charts_list: list[dict] = []
-    with ThreadPoolExecutor(max_workers=2) as pool:
+    with ThreadPoolExecutor(max_workers=3) as pool:
         verify_fut = pool.submit(
             _verify_subagent, ml["model_info"], state, model_type, target_col,
         )
         if pipeline in ("full_analysis", "risk_scan"):
-            viz_fut = pool.submit(_viz_subagent, ml["predictions"], state)
+            # Pass verify results to viz for feature importance chart (may be empty at this point)
+            viz_fut = pool.submit(_viz_subagent, ml["predictions"], state, {})
         else:
             viz_fut = None
 
@@ -325,9 +471,29 @@ def run_analytics_pipeline(
             except Exception:
                 charts_list = []
 
+    # Merge EDA charts into the main chart list
+    eda_charts = eda_result.get("charts", [])
+    if isinstance(eda_charts, list):
+        charts_list.extend(eda_charts)
+
     analytics_report["evaluation"] = verify.get("metrics", {})
     analytics_report["feature_importance"] = verify.get("feature_importance", {})
     analytics_report["anomalies"] = verify.get("anomalies", [])
+
+    # Add feature importance chart now that verify is done
+    if verify.get("feature_importance") and pipeline in ("full_analysis", "risk_scan"):
+        try:
+            fi_charts = _viz_subagent(ml["predictions"], state, verify)
+            # Avoid duplicating non-importance charts — only take new ones
+            existing_types = {c.get("chart_type") for c in charts_list}
+            for c in fi_charts:
+                if c.get("chart_type") not in existing_types:
+                    charts_list.append(c)
+                elif "Feature Importance" in c.get("title", ""):
+                    charts_list.append(c)
+        except Exception:
+            pass
+
     analytics_report["charts"] = charts_list
 
     # ── Phase 4: Analysis narrative (pure Python, fast) ────────
@@ -339,6 +505,7 @@ def run_analytics_pipeline(
         web_research=analytics_report.get("web_research", []),
         scenario=scenario,
         state=state,
+        eda=analytics_report.get("eda"),
     )
     analytics_report["analysis_report"] = narrative
     analytics_report["sources"] = sources

@@ -7,11 +7,82 @@ from __future__ import annotations
 
 import json
 import math
+import os
+import urllib.error
+import urllib.request
 import uuid
 from datetime import datetime, timedelta
 from typing import Any
 
 from langchain_core.tools import tool
+
+# ---------------------------------------------------------------------------
+# OpenRouteService integration — real road routing with turn-by-turn directions
+# ---------------------------------------------------------------------------
+ORS_BASE = "https://api.openrouteservice.org/v2/directions/driving-hgv/geojson"
+
+
+def _ors_route(coords_lonlat: list[list[float]]) -> dict:
+    """Call ORS Directions API. Returns road geometry + turn-by-turn steps.
+
+    coords_lonlat: [[lon, lat], ...] — ORS uses longitude-first (GeoJSON order).
+    Raises RuntimeError on any failure so callers can fall back silently.
+    """
+    api_key = os.getenv("OPENROUTESERVICE_API_KEY", "")
+    if not api_key:
+        raise RuntimeError("OPENROUTESERVICE_API_KEY not set")
+
+    body = json.dumps({
+        "coordinates": coords_lonlat,
+        "instructions": True,
+        "units": "mi",
+    }).encode()
+    req = urllib.request.Request(
+        ORS_BASE,
+        data=body,
+        headers={
+            "Authorization": api_key,
+            "Content-Type": "application/json",
+            "Accept": "application/json, application/geo+json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"ORS HTTP {e.code}: {e.reason}") from e
+    except Exception as e:
+        raise RuntimeError(f"ORS error: {e}") from e
+
+    feature = data["features"][0]
+    geom_coords = feature["geometry"]["coordinates"]   # [[lon, lat], ...]
+    summary = feature["properties"]["summary"]
+    segments = feature["properties"]["segments"]
+
+    per_segment = []
+    all_steps = []
+    for seg in segments:
+        per_segment.append({
+            "distance_miles": round(seg.get("distance", 0) * 0.000621371, 1),
+            "duration_minutes": round(seg.get("duration", 0) / 60, 1),
+        })
+        for step in seg.get("steps", []):
+            all_steps.append({
+                "instruction": step.get("instruction", ""),
+                "distance_miles": round(step.get("distance", 0) * 0.000621371, 2),
+                "duration_minutes": round(step.get("duration", 0) / 60, 1),
+                "type": step.get("type", 4),   # 0=left, 1=right, 4=straight, 5=roundabout
+            })
+
+    return {
+        "geometry": geom_coords,          # road polyline as [[lon, lat], ...]
+        "distance_miles": round(summary.get("distance", 0) * 0.000621371, 1),
+        "duration_minutes": round(summary.get("duration", 0) / 60, 1),
+        "per_segment": per_segment,       # one entry per route leg
+        "steps": all_steps,
+    }
+
 
 LOCATIONS: dict[str, tuple[float, float]] = {
     "Wayne County": (37.11, -90.46),
@@ -114,14 +185,33 @@ def optimize_delivery_route(
             "to_lat": coords[route[i + 1]][0], "to_lon": coords[route[i + 1]][1],
         })
 
-    return {
+    result = {
         "optimized_route": route,
         "total_distance_miles": total_miles,
         "total_stops": len(route),
         "est_total_drive_minutes": sum(leg["est_drive_minutes"] for leg in legs),
         "legs": legs,
         "method": "nearest-neighbor heuristic (45 mph avg rural MO roads)",
+        "ors": None,
     }
+
+    try:
+        # ORS coords are [lon, lat] — swap from LOCATIONS (lat, lon)
+        coords_lonlat = [[coords[stop][1], coords[stop][0]] for stop in route]
+        ors = _ors_route(coords_lonlat)
+        result["ors"] = ors
+        result["total_distance_miles"] = ors["distance_miles"]
+        result["est_total_drive_minutes"] = round(ors["duration_minutes"])
+        result["method"] = "OpenRouteService (real road distances, driving-hgv)"
+        # Update per-leg data from ORS segments
+        if len(ors["per_segment"]) == len(legs):
+            for i, seg in enumerate(ors["per_segment"]):
+                result["legs"][i]["distance_miles"] = seg["distance_miles"]
+                result["legs"][i]["est_drive_minutes"] = round(seg["duration_minutes"])
+    except RuntimeError:
+        pass  # silent fallback — haversine data already populated
+
+    return result
 
 
 @tool
@@ -159,18 +249,27 @@ def create_route_map(route_json: str) -> dict[str, Any]:
         return {"error": "No legs data in route_json"}
 
     coords = dict(LOCATIONS)
+    ors = route_data.get("ors")
 
-    line_lats: list[float | None] = []
-    line_lons: list[float | None] = []
-    for leg in legs:
-        line_lats.extend([leg["from_lat"], leg["to_lat"], None])
-        line_lons.extend([leg["from_lon"], leg["to_lon"], None])
+    if ors and ors.get("geometry"):
+        road_lats = [pt[1] for pt in ors["geometry"]]  # GeoJSON: [lon, lat]
+        road_lons = [pt[0] for pt in ors["geometry"]]
+        route_label = "Road Route (ORS)"
+    else:
+        line_lats_raw: list[float | None] = []
+        line_lons_raw: list[float | None] = []
+        for leg in legs:
+            line_lats_raw.extend([leg["from_lat"], leg["to_lat"], None])
+            line_lons_raw.extend([leg["from_lon"], leg["to_lon"], None])
+        road_lats = line_lats_raw
+        road_lons = line_lons_raw
+        route_label = "Route (straight-line estimate)"
 
     line_trace = {
         "type": "scattermapbox", "mode": "lines",
-        "lat": line_lats, "lon": line_lons,
+        "lat": road_lats, "lon": road_lons,
         "line": {"color": "#3b82f6", "width": 3},
-        "name": "Route",
+        "name": route_label,
     }
 
     stop_lats = [coords[s][0] for s in route_order if s in coords]
@@ -196,12 +295,13 @@ def create_route_map(route_json: str) -> dict[str, Any]:
     center_lon = sum(stop_lons) / len(stop_lons) if stop_lons else -90.0
     total_miles = route_data.get("total_distance_miles", 0)
     total_min = route_data.get("est_total_drive_minutes", 0)
+    method_tag = "via ORS" if ors else "haversine estimate"
 
     layout = {
         "template": "plotly_dark",
         "paper_bgcolor": "rgba(11,15,26,0.95)",
         "font": {"color": "#e2e8f0"},
-        "title": {"text": f"Delivery Route - {total_miles} mi, ~{total_min} min"},
+        "title": {"text": f"Delivery Route — {total_miles} mi, ~{total_min} min ({method_tag})"},
         "mapbox": {"style": "carto-darkmatter",
                    "center": {"lat": center_lat, "lon": center_lon}, "zoom": 7},
         "height": 500,
@@ -212,7 +312,8 @@ def create_route_map(route_json: str) -> dict[str, Any]:
 
     return {"chart_id": f"route_{uuid.uuid4().hex[:8]}", "chart_type": "route_map",
             "title": f"Delivery Route ({len(route_order)} stops)",
-            "plotly_spec": {"data": [line_trace, marker_trace], "layout": layout}}
+            "plotly_spec": {"data": [line_trace, marker_trace], "layout": layout},
+            "ors_steps": ors["steps"] if ors else []}
 
 
 @tool

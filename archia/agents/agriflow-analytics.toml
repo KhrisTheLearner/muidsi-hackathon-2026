@@ -4,3 +4,7 @@ model_name = "priv-claude-sonnet-4-5-20250929"
 enabled = true
 description = "Data analytics supervisor: XGBoost/Random Forest training, SHAP explainability, CCC validation, anomaly detection, web risk search, and full analytics pipelines"
 system_prompt_file = "agriflow-analytics.md"
+
+[mcp_tools]
+agriflow-ml = null       # All ML tools: train, predict, explain, anomaly, web search
+agriflow-sqlite = null   # Data access for feature matrix building
