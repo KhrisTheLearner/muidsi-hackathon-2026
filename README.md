@@ -6,11 +6,9 @@
 
 > Ask AgriFlow anything about Missouri food supply chains — it reasons across crop data, census demographics, disaster history, weather, and trained ML models to give actionable answers with charts, maps, and delivery routes.
 
-## 🚀 Live Demo
+## Live Demo
 
-**[agriflow-team02.netlify.app](https://agriflow-team02.netlify.app)** — The AgriFlow demo is LIVE.
-
-Frontend hosted on Netlify. Backend (FastAPI + LangGraph + 32 tools) running on Hugging Face Spaces with 16 GB RAM.
+[The AgriFlow demo is LIVE](https://agriflow-team02.netlify.app) - Frontend hosted on Netlify. Backend (FastAPI + LangGraph + 32 tools) running on Hugging Face Spaces with 16 GB RAM.
 
 **[AgriFlow U.S. Food Environment Atlas Dashboard](https://rshiny.dsa.missouri.edu/students/sspnp6/ShinyApps/DATA-SCI-8310/Hackathon/)** — Interactive R Shiny dashboard exploring the USDA Food Environment Atlas data.
 
