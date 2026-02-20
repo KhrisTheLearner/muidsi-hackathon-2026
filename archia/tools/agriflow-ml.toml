@@ -1,0 +1,14 @@
+# AgriFlow ML Analytics MCP Tool
+# Provides ML training, prediction, SHAP explanations, anomaly detection, and web risk search
+
+identifier = "agriflow-ml"
+name = "AgriFlow ML Analytics"
+description = "XGBoost/Random Forest training, SHAP feature importance, anomaly detection, web risk search, and full analytics pipelines for food insecurity risk"
+provider = "AgriFlow"
+version = "1.0.0"
+type = "mcp"
+
+[local]
+cmd = "python"
+args = ["-m", "src.mcp_servers.ml_server"]
+timeout_secs = 60

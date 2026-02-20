@@ -1,0 +1,7 @@
+# DEPRECATED: This agent has been merged into agriflow-analytics
+# Kept for backwards compatibility only - do not use for new skills
+name = "agriflow-ml"
+model_name = "priv-claude-sonnet-4-5-20250929"
+enabled = false  # Disabled - use agriflow-analytics instead
+description = "DEPRECATED: Use agriflow-analytics for all ML tasks"
+system_prompt_file = "agriflow-ml.md"
