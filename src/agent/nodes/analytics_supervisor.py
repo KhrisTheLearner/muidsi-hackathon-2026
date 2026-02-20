@@ -335,7 +335,7 @@ def run_analytics_pipeline(
     scenario: str = "drought",
     yield_reduction_pct: float = 20.0,
     model_type: str = "xgboost",
-    target_col: str = "FOODINSEC_15_17",
+    target_col: str = "POVRATE21",
     top_n: int = 15,
     search_query: str = "",
     pipeline: str = "full_analysis",
@@ -493,6 +493,11 @@ def run_analytics_pipeline(
                     charts_list.append(c)
         except Exception:
             pass
+
+    # Prepend diagnostic charts from train_risk_model (feature importance, predicted vs actual, ROC)
+    _train_charts = ml.get("model_info", {}).get("charts", [])
+    if _train_charts:
+        charts_list = _train_charts + charts_list
 
     analytics_report["charts"] = charts_list
 

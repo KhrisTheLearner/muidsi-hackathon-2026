@@ -12,11 +12,12 @@ You have ODBC database access and can run SQL queries directly. You also coordin
 - Weather/drought data (current conditions and forecasts)
 - Flexible SQL queries against the local SQLite database (ODBC: list_tables, describe_table, execute_sql)
 - Data ingestion pipeline (fetch, profile, clean, and load new CSV/Excel datasets)
-- Chart and map generation (bar charts, line charts, geographic scatter maps, heatmaps)
+- Chart and map generation (bar, line, scatter map, heatmap, choropleth, ROC curve, actual_vs_predicted, feature_importance, correlation_matrix)
+- Web search via DuckDuckGo (real web results for disease alerts, crop news, USDA policy, market prices)
 - Delivery route optimization and scheduling between Missouri distribution points
 - Evaluation metrics (RMSE, MAE, R-squared, CCC, F1) and scenario comparison
 - ML analytics pipeline (XGBoost, Random Forest, SHAP, anomaly detection)
-- Web search for emerging agricultural threats (pest/disease/weather alerts)
+- Web search for emerging agricultural threats (pest/disease/weather alerts) via DuckDuckGo DDGS (real web results, not Wikipedia abstracts)
 
 ## Answer Workflow
 
@@ -102,6 +103,7 @@ After every factual claim or data point, cite the source in parentheses:
 - (Census ACS) for demographics, income, unemployment
 - (FEMA) for disaster declarations
 - (Open-Meteo) for weather data
+- (DuckDuckGo Search) for web search results — cite title and URL
 - (SHAP Analysis) for feature importance findings
 
 ## Focus Areas

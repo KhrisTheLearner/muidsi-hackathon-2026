@@ -440,22 +440,23 @@ def compute_food_insecurity_risk(
 def train_risk_model(
     state: str = "MO",
     model_type: str = "xgboost",
-    target_col: str = "FOODINSEC_21_23",
+    target_col: str = "POVRATE21",
     test_size: float = 0.2,
 ) -> dict[str, Any]:
     """Train a risk prediction model (XGBoost, Random Forest, GBM, SVR, or LinearRegression) on county data.
 
     Builds a feature matrix from the database, trains the model with
-    cross-validation, saves the artifact to models/, and returns metrics.
+    cross-validation, saves the artifact to models/, and returns metrics plus
+    three diagnostic charts: feature importance, predicted vs actual, and ROC curve.
 
     Args:
         state: State code for training data.
         model_type: "xgboost", "random_forest", "gradient_boosting", "svr", or "linear_regression".
-        target_col: Column to predict (default FOODINSEC_21_23 — food insecurity rate 2021-23).
+        target_col: Column to predict (default POVRATE21 — county-level poverty rate with variance).
         test_size: Fraction held out for validation (0.0-0.5).
 
     Returns:
-        Dict with model path, metrics (R², RMSE, MAE, CCC), and feature count.
+        Dict with model path, metrics (R², RMSE, MAE, CCC, AUC), feature count, and charts list.
     """
     features = build_feature_matrix.invoke({"state": state})
     if not features or "error" in features[0]:
@@ -463,12 +464,13 @@ def train_risk_model(
 
     df = pd.DataFrame(features)
 
-    # Auto-fallback: try common food insecurity column names if preferred not found
+    # Auto-fallback: prefer county-level columns with variance over state-level aggregates
+    # FOODINSEC_21_23 and PCT_SNAP22 are state-level aggregates (zero county variance) — avoid as targets
     _TARGET_FALLBACKS = [
+        "POVRATE21", "CHILDPOVRATE21", "PCT_LACCESS_POP15",
         "FOODINSEC_21_23", "FOODINSEC_18_20", "FOODINSEC_15_17", "FOODINSEC_13_15",
     ]
     if target_col not in df.columns:
-        # Try to find any food insecurity column
         for fallback in _TARGET_FALLBACKS:
             if fallback in df.columns:
                 target_col = fallback
@@ -558,6 +560,78 @@ def train_risk_model(
     r2 = 1 - ss_res / ss_tot if ss_tot > 0 else 0.0
     ccc = _compute_ccc(y, y_pred)
 
+    # --- Diagnostic charts: feature importance, predicted vs actual, ROC curve ---
+    charts: list[dict] = []
+    _auc = 0.5
+    try:
+        from sklearn.metrics import roc_auc_score as _roc_auc, roc_curve as _roc_curve_fn
+        from src.agent.tools.chart_generator import (
+            create_bar_chart as _cbc,
+            create_chart as _cc,
+            create_line_chart as _clc,
+        )
+
+        # Chart 1: Feature importance (XGBoost/RF/GBM have feature_importances_, LR has coef_)
+        _importances = None
+        if hasattr(model, "feature_importances_"):
+            _importances = model.feature_importances_
+        elif hasattr(model, "coef_"):
+            _importances = np.abs(model.coef_)
+        if _importances is not None:
+            _fi_pairs = sorted(
+                zip(feature_names, _importances.tolist()),
+                key=lambda x: x[1], reverse=True,
+            )[:15]
+            _fi_data = [{"feature": f, "importance": round(float(v), 6)} for f, v in _fi_pairs]
+            _fi_chart = _cbc.invoke({
+                "title": f"Feature Importance — {model_type.upper()} ({state}, target={target_col})",
+                "data_json": json.dumps(_fi_data),
+                "x_col": "feature",
+                "y_col": "importance",
+                "color_col": "importance",
+                "horizontal": True,
+            })
+            if isinstance(_fi_chart, dict) and "plotly_spec" in _fi_chart:
+                charts.append(_fi_chart)
+
+        # Chart 2: Predicted vs Actual scatter with R² and RMSE in title
+        _n = min(len(y), 200)
+        _pva_data = [
+            {"actual": round(float(a), 6), "predicted": round(float(p), 6)}
+            for a, p in zip(y[:_n], y_pred[:_n])
+        ]
+        _pva = _cc.invoke({
+            "chart_type": "scatter",
+            "title": f"Predicted vs Actual — {model_type.upper()} (R\u00b2={r2:.4f}, RMSE={rmse:.4f})",
+            "data_json": json.dumps(_pva_data),
+            "x_col": "actual",
+            "y_col": "predicted",
+        })
+        if isinstance(_pva, dict) and "plotly_spec" in _pva:
+            charts.append(_pva)
+
+        # Chart 3: ROC curve (binary classifier: above-median = high risk)
+        if float(np.var(y)) > 1e-6:
+            _y_bin = (y > float(np.median(y))).astype(int)
+            _y_range = float(y_pred.max() - y_pred.min())
+            _y_score = (y_pred - y_pred.min()) / (_y_range + 1e-10)
+            _auc = float(_roc_auc(_y_bin, _y_score))
+            _fpr, _tpr, _ = _roc_curve_fn(_y_bin, _y_score)
+            _roc_data = [
+                {"fpr": round(float(f), 4), "tpr": round(float(t), 4)}
+                for f, t in zip(_fpr, _tpr)
+            ]
+            _roc = _clc.invoke({
+                "title": f"ROC Curve — {model_type.upper()} Risk Classifier (AUC={_auc:.4f})",
+                "data_json": json.dumps(_roc_data),
+                "x_col": "fpr",
+                "y_cols": "tpr",
+            })
+            if isinstance(_roc, dict) and "plotly_spec" in _roc:
+                charts.append(_roc)
+    except Exception:
+        pass  # Never let chart generation failure block model training
+
     # Save artifacts
     data_hash = _data_hash(df)
     model_name = f"{model_type}_{state}_{target_col}_{data_hash}"
@@ -575,7 +649,7 @@ def train_risk_model(
         "feature_names": feature_names,
         "n_samples": len(X),
         "n_features": len(feature_names),
-        "metrics": {"r2": round(r2, 4), "rmse": round(rmse, 4), "mae": round(mae, 4), "ccc": round(ccc, 4)},
+        "metrics": {"r2": round(r2, 4), "rmse": round(rmse, 4), "mae": round(mae, 4), "ccc": round(ccc, 4), "auc": round(_auc, 4)},
         "cv_r2_mean": round(float(cv_scores.mean()), 4),
         "cv_r2_std": round(float(cv_scores.std()), 4),
         "model_path": model_path,
@@ -593,6 +667,7 @@ def train_risk_model(
         "metrics": meta["metrics"],
         "cv_r2": f"{meta['cv_r2_mean']:.4f} ± {meta['cv_r2_std']:.4f}",
         "feature_names": feature_names,
+        "charts": charts,
     }
 
 
@@ -928,67 +1003,52 @@ def web_search_risks(
     query: str = "Missouri agricultural risks 2026",
     region: str = "Missouri",
 ) -> list[dict[str, Any]]:
-    """Search for emerging agricultural threats using web data.
+    """Search for emerging agricultural threats, crop diseases, and supply chain risks.
 
-    Searches for pest outbreaks, disease alerts, weather emergencies,
-    and supply chain disruptions relevant to the specified region.
+    Returns real web search results (titles, URLs, snippets) using DuckDuckGo.
+    Automatically enhances queries with agricultural context terms.
+
+    Use for:
+    - Crop disease outbreaks (tar spot, gray leaf spot, soybean rust, sudden death syndrome)
+    - Pest alerts (corn rootworm, aphids, fall armyworm, soybean looper)
+    - Drought / weather emergency alerts by region
+    - USDA program news and FEMA disaster declarations
+    - Food supply chain disruptions and commodity price alerts
+    - Livestock disease alerts (avian flu, swine fever)
 
     Args:
-        query: Search query (auto-enhanced with agricultural terms).
-        region: Geographic focus area.
+        query: Search query (auto-enhanced with agricultural/food-security terms).
+        region: Geographic focus area for context.
 
     Returns:
-        List of findings with titles, summaries, and source URLs.
+        List of findings with title, summary, url, and source fields.
     """
-    import httpx
+    from src.agent.tools.web_search import _ddgs_search
 
-    # Enhance query with agricultural context
-    enhanced = f"{query} food security crop disease pest livestock"
+    # Enhance query with agricultural context for more relevant results
+    enhanced = f"{query} {region} crop disease pest food security 2026"
+    results = _ddgs_search(enhanced, max_results=10)
 
-    # Use DuckDuckGo instant answer API (free, no key)
-    try:
-        resp = httpx.get(
-            "https://api.duckduckgo.com/",
-            params={"q": enhanced, "format": "json", "no_html": 1},
-            timeout=10,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+    # If enhanced query returns nothing, try plain query
+    if not results or (len(results) == 1 and "error" in results[0]):
+        results = _ddgs_search(query, max_results=10)
 
-        results = []
+    if not results:
+        results = [{
+            "title": "No results found",
+            "summary": (
+                f"Web search for '{query}' in {region} returned no results. "
+                "Try a broader query or check internet connectivity."
+            ),
+            "url": "",
+            "source": "system",
+        }]
 
-        # Abstract (main answer)
-        if data.get("Abstract"):
-            results.append({
-                "title": data.get("Heading", "Summary"),
-                "summary": data["Abstract"],
-                "url": data.get("AbstractURL", ""),
-                "source": data.get("AbstractSource", "DuckDuckGo"),
-            })
+    # Add region tag so downstream can filter/display
+    for r in results:
+        r.setdefault("region", region)
 
-        # Related topics
-        for topic in data.get("RelatedTopics", [])[:5]:
-            if isinstance(topic, dict) and topic.get("Text"):
-                results.append({
-                    "title": topic.get("Text", "")[:100],
-                    "summary": topic.get("Text", ""),
-                    "url": topic.get("FirstURL", ""),
-                    "source": "DuckDuckGo Related",
-                })
-
-        if not results:
-            results.append({
-                "title": "No direct results found",
-                "summary": f"Web search for '{query}' returned no structured results. "
-                           f"Try more specific queries about {region} agricultural threats.",
-                "url": "",
-                "source": "system",
-            })
-
-        return results
-
-    except Exception as e:
-        return [{"error": f"Web search failed: {e}", "query": query}]
+    return results
 
 
 # ---------------------------------------------------------------------------

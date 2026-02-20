@@ -11,3 +11,4 @@ agriflow-sqlite = null   # Full SQL access: USDA, Census, FEMA, agricultural dat
 agriflow-ml = null       # Full ML suite: training, prediction, SHAP, anomaly detection
 agriflow-charts = null   # Chart/map generation for dashboards
 agriflow-routes = null   # Delivery route optimization and scheduling
+agriflow-data = null     # Live API access: NASS, FEMA, Census ACS, weather, web search

@@ -59,6 +59,7 @@ from src.agent.tools.ingest import (
     list_db_tables, fetch_and_profile_csv, load_dataset,
     run_eda_query, drop_table,
 )
+from src.agent.tools.web_search import search_web, search_agricultural_news
 
 # ---------------------------------------------------------------------------
 # Specialized tool groups — each agent only sees what it needs
@@ -66,6 +67,7 @@ from src.agent.tools.ingest import (
 DATA_TOOLS = [
     query_food_atlas, query_food_access, query_nass, query_weather,
     query_fema_disasters, query_census_acs, run_prediction,
+    search_web, search_agricultural_news,
 ]
 
 VIZ_TOOLS = [
@@ -73,6 +75,7 @@ VIZ_TOOLS = [
     # Include data tools so viz agent can query data if not already in context
     query_food_atlas, query_food_access, query_nass, query_weather,
     query_fema_disasters, query_census_acs, run_prediction,
+    search_web, search_agricultural_news,
 ]
 
 ROUTE_TOOLS = [
@@ -157,7 +160,10 @@ def _detect_category(plan: list[str], step: int) -> str:
                       "eda", "exploratory", "distribution", "correlation",
                       "gradient boost", "composite risk", "vulnerability"],
         "data": ["food", "insecur", "atlas", "census", "fema", "disaster",
-                 "weather", "nass", "crop", "yield", "poverty", "snap"],
+                 "weather", "nass", "crop", "yield", "poverty", "snap",
+                 "disease", "pest", "outbreak", "news", "alert", "search",
+                 "tar spot", "aphid", "rootworm", "avian flu", "corn yield",
+                 "soybean yield"],
         "viz":  ["chart", "bar", "line", "heatmap", "scatter", "map", "visual",
                  "graph", "plot", "dashboard", "pie", "histogram", "box plot",
                  "violin", "area chart", "funnel", "treemap", "sunburst",
@@ -309,6 +315,36 @@ def _build_synthetic_tool_calls(step_text: str, category: str, query: str) -> li
                 "id": f"synth_{uuid.uuid4().hex[:8]}",
                 "type": "tool_call",
             })
+        if _step_has("disease", "pest", "outbreak", "news", "alert", "threat",
+                     "tar spot", "aphid", "rootworm", "avian flu", "search web",
+                     "web search", "search agricultural"):
+            # Extract the most specific topic from step/query text
+            topic = "crop disease pest outbreak"
+            for kw in ["tar spot", "gray leaf spot", "soybean rust", "sudden death",
+                        "aphid", "rootworm", "fall armyworm", "avian flu", "swine fever",
+                        "drought", "disease", "pest", "outbreak"]:
+                if kw in step_lower or kw in query_lower:
+                    topic = kw
+                    break
+            args = {"topic": topic}
+            if state:
+                args["region"] = state
+            calls.append({
+                "name": "search_agricultural_news",
+                "args": args,
+                "id": f"synth_{uuid.uuid4().hex[:8]}",
+                "type": "tool_call",
+            })
+        if _step_has("search web", "web search") and not _step_has(
+                "disease", "pest", "outbreak", "news", "alert"):
+            # Plain web search (not agriculture-specific)
+            topic = query[:120] if query else step_text[:120]
+            calls.append({
+                "name": "search_web",
+                "args": {"query": topic},
+                "id": f"synth_{uuid.uuid4().hex[:8]}",
+                "type": "tool_call",
+            })
         # Fallback: if no step-specific keywords matched, use query keywords
         if not calls:
             if _any_has("food insecur", "poverty", "risk", "hunger"):
@@ -334,11 +370,21 @@ def _build_synthetic_tool_calls(step_text: str, category: str, query: str) -> li
                 })
 
     elif category == "analytics" or "[analytics]" in step_text.lower():
-        args = {}
+        args: dict = {}
         if state:
             args["state"] = state
+        # Extract model_type from step text (check multi-word names first)
+        for _mt in ("gradient_boosting", "random_forest", "linear_regression", "xgboost", "svr"):
+            if _mt.replace("_", " ") in step_text.lower() or _mt in step_text.lower():
+                args["model_type"] = _mt
+                break
+        # Extract scenario
+        for _sc in ("drought", "price_shock", "baseline"):
+            if _sc in step_text.lower():
+                args["scenario"] = _sc
+                break
         calls.append({
-            "name": "build_feature_matrix",
+            "name": "run_analytics_pipeline",
             "args": args,
             "id": f"synth_{uuid.uuid4().hex[:8]}",
             "type": "tool_call",
@@ -419,15 +465,17 @@ def tool_caller_node(state: AgriFlowState) -> dict:
         force_tools = (
             "\n\nCRITICAL: This is a [data] step. You MUST call at least one data "
             "tool (query_food_atlas, query_food_access, query_nass, query_weather, "
-            "query_fema_disasters, query_census_acs). Do NOT respond with text only. "
+            "query_fema_disasters, query_census_acs, search_web, "
+            "search_agricultural_news). Do NOT respond with text only. "
             "The downstream visualization steps DEPEND on real tool data being in "
-            "the message history. If you skip this, the charts will have no data."
+            "the message history. If you skip this, the charts will have no data. "
+            "For disease/pest/outbreak/news queries, call search_agricultural_news."
         )
     elif "[analytics]" in step_text_lower:
         force_tools = (
-            "\n\nCRITICAL: This is an [analytics] step. You MUST call analytics tools "
-            "(train_risk_model, predict_risk, build_feature_matrix, detect_anomalies, "
-            "explain_with_shap, etc.). Do NOT skip with a text-only response."
+            "\n\nCRITICAL: This is an [analytics] step. You MUST call "
+            "run_analytics_pipeline (preferred — returns R², RMSE, CCC, AUC, charts) "
+            "or train_risk_model + predict_risk. Do NOT skip with a text-only response."
         )
     elif "[ml]" in step_text_lower:
         force_tools = (
