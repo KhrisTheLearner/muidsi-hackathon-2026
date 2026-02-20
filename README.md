@@ -6,6 +6,11 @@
 
 > Ask AgriFlow anything about Missouri food supply chains — it reasons across crop data, census demographics, disaster history, weather, and trained ML models to give actionable answers with charts, maps, and delivery routes.
 
+### Working Demos: 
+
+[AgriFlow Live Demo](https://agriflow-team02.netlify.app)
+[AgriFlow U.S. Food Environment Atlas Dashboard](https://rshiny.dsa.missouri.edu/students/sspnp6/ShinyApps/DATA-SCI-8310/Hackathon/)
+ 
 ---
 
 ## What It Does
