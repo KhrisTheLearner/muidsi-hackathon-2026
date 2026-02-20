@@ -4,7 +4,7 @@
  * Tabs: Query · Dashboard · Data Sources · Map & Alerts
  */
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { queryAgent, queryAgentStream, getHealth, getExamples, getCharts, getAnalytics, getEvalSummary, planRoute as planRouteApi } from './api'
+import { queryAgent, queryAgentStream, getHealth, getExamples, getAnalytics, getEvalSummary, planRoute as planRouteApi } from './api'
 
 // ─── Theme ─────────────────────────────────────────────────────────────────
 const T = {
@@ -267,16 +267,17 @@ function PlotlyChart({ spec, height = 320 }) {
     })
 
     // Resize when container dimensions change (e.g. tab becomes visible, window resize)
+    const el = ref.current  // capture before async cleanup can null it
     const observer = new ResizeObserver(() => {
-      if (ref.current && window.Plotly) {
-        window.Plotly.Plots.resize(ref.current)
+      if (el && window.Plotly) {
+        window.Plotly.Plots.resize(el)
       }
     })
-    observer.observe(ref.current)
+    observer.observe(el)
 
     return () => {
       observer.disconnect()
-      window.Plotly?.purge(ref.current)
+      if (el) window.Plotly?.purge(el)
     }
   }, [spec, height])
 
@@ -521,10 +522,12 @@ function QueryTab({ onChartAdded }) {
         <div ref={endRef} />
       </div>
 
-      {/* Quick queries */}
+      {/* Quick queries — only show buttons that have a matching example loaded */}
       <div style={{ padding:'8px 24px 0', display:'flex', gap:6, flexWrap:'wrap', flexShrink:0 }}>
-        {['Food Insecurity Hotspots','Corn Dependency Analysis','Drought Scenario Planning','Route Optimization'].map((label, i) => (
-          <button key={i} onClick={() => examples[i] && send(examples[i].query)} disabled={loading} style={{
+        {['Food Insecurity Hotspots','Corn Dependency Analysis','Drought Scenario Planning','Route Optimization']
+          .filter((_, i) => examples[i])
+          .map((label, i) => (
+          <button key={i} onClick={() => send(examples[i].query)} disabled={loading} style={{
             padding:'5px 10px', borderRadius:7, border:`1px solid ${T.border}`,
             background:T.surface, color: loading ? T.muted : T.sub, fontSize:11, cursor: loading ? 'default':'pointer',
             transition:'all .2s',
@@ -616,7 +619,10 @@ function DashboardTab({ sessionCharts }) {
               </div>
             ))}
           </div>
-          {latestReport.feature_importance?.slice(0,5).map((f, i) => (
+          {(Array.isArray(latestReport.feature_importance)
+              ? latestReport.feature_importance
+              : Object.entries(latestReport.feature_importance || {}).map(([feature, importance]) => ({ feature, importance }))
+            ).slice(0,5).map((f, i) => (
             <div key={i} style={{ display:'flex', alignItems:'center', gap:10, marginBottom:6 }}>
               <div style={{ width:70, fontSize:10.5, color:T.muted, textAlign:'right', flexShrink:0 }}>{f.feature?.split('_').slice(-1)[0]}</div>
               <div style={{ flex:1, height:6, background:'rgba(255,255,255,.06)', borderRadius:3, overflow:'hidden' }}>
@@ -626,7 +632,9 @@ function DashboardTab({ sessionCharts }) {
             </div>
           ))}
           {latestReport.analysis_report && (
-            <p style={{ color:T.sub, fontSize:12, lineHeight:1.6, marginTop:12, whiteSpace:'pre-wrap' }}>{latestReport.analysis_report}</p>
+            <div style={{ fontSize:13, lineHeight:1.65, color:T.text, marginTop:12 }}>
+              <Md text={latestReport.analysis_report} />
+            </div>
           )}
         </div>
       )}
@@ -909,7 +917,9 @@ function AlertsTab({ onChartAdded }) {
         {routeResult && (
           <div style={{ marginTop:12 }}>
             {routeResult.answer && (
-              <p style={{ color:T.text, fontSize:12.5, lineHeight:1.6, whiteSpace:'pre-wrap', marginBottom:12 }}>{routeResult.answer}</p>
+              <div style={{ fontSize:13, lineHeight:1.65, color:T.text, marginBottom:12 }}>
+                <Md text={routeResult.answer} />
+              </div>
             )}
             {routeResult.charts?.map((ch, i) => (
               <div key={i} style={{ marginTop:8 }}>
@@ -971,6 +981,19 @@ const TABS = [
 export default function App() {
   const [tab, setTab]             = useState('query')
   const [charts, setCharts]       = useState([])
+
+  // When switching tabs, force-resize any Plotly charts that were rendered
+  // while their container had display:none (ResizeObserver can't observe them then)
+  useEffect(() => {
+    const t = setTimeout(() => {
+      document.querySelectorAll('.js-plotly-plot').forEach(el => {
+        if (el.offsetParent !== null && window.Plotly) {
+          window.Plotly.Plots.resize(el)
+        }
+      })
+    }, 50)
+    return () => clearTimeout(t)
+  }, [tab])
 
   const addCharts = useCallback((newCharts) => {
     setCharts(prev => {
