@@ -15,9 +15,12 @@ Routing table:
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+import queue
+import re
+import threading
+import uuid
 
-from langchain_core.messages import AIMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from src.agent.llm import (
     DATA_MODEL, LOGISTICS_MODEL, ML_MODEL, SQL_MODEL, VIZ_MODEL, get_llm,
@@ -44,7 +47,8 @@ from src.agent.tools.evaluation import (
 )
 from src.agent.tools.fema_disasters import query_fema_disasters
 from src.agent.tools.ml_engine import (
-    build_feature_matrix, detect_anomalies, get_feature_importance,
+    build_feature_matrix, build_tract_feature_matrix, compute_food_insecurity_risk,
+    detect_anomalies, get_feature_importance,
     predict_crop_yield, predict_risk, train_crop_model, train_risk_model,
     web_search_risks, run_eda_pipeline,
 )
@@ -82,7 +86,8 @@ ML_TOOLS = [
 ANALYTICS_TOOLS = [
     train_risk_model, predict_risk, train_crop_model, predict_crop_yield,
     get_feature_importance, detect_anomalies, web_search_risks,
-    build_feature_matrix, run_analytics_pipeline, run_eda_pipeline,
+    build_feature_matrix, build_tract_feature_matrix, compute_food_insecurity_risk,
+    run_analytics_pipeline, run_eda_pipeline,
     compute_evaluation_metrics, compare_scenarios, compute_ccc, explain_with_shap,
 ]
 
@@ -190,6 +195,201 @@ def get_tool_executor_llm():
     return llm.bind_tools(ALL_TOOLS)
 
 
+# ---------------------------------------------------------------------------
+# Synthetic tool call builder — when LLM refuses, we construct calls ourselves
+# ---------------------------------------------------------------------------
+_STATE_ABBREVS = {
+    "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR",
+    "california": "CA", "colorado": "CO", "connecticut": "CT", "delaware": "DE",
+    "florida": "FL", "georgia": "GA", "hawaii": "HI", "idaho": "ID",
+    "illinois": "IL", "indiana": "IN", "iowa": "IA", "kansas": "KS",
+    "kentucky": "KY", "louisiana": "LA", "maine": "ME", "maryland": "MD",
+    "massachusetts": "MA", "michigan": "MI", "minnesota": "MN",
+    "mississippi": "MS", "missouri": "MO", "montana": "MT", "nebraska": "NE",
+    "nevada": "NV", "new hampshire": "NH", "new jersey": "NJ",
+    "new mexico": "NM", "new york": "NY", "north carolina": "NC",
+    "north dakota": "ND", "ohio": "OH", "oklahoma": "OK", "oregon": "OR",
+    "pennsylvania": "PA", "rhode island": "RI", "south carolina": "SC",
+    "south dakota": "SD", "tennessee": "TN", "texas": "TX", "utah": "UT",
+    "vermont": "VT", "virginia": "VA", "washington": "WA",
+    "west virginia": "WV", "wisconsin": "WI", "wyoming": "WY",
+}
+
+
+def _extract_state_from_text(text: str) -> str | None:
+    """Extract a US state abbreviation from step/query text."""
+    # Check for 2-letter codes already
+    m = re.search(r'\b([A-Z]{2})\b', text)
+    if m and m.group(1) in _STATE_ABBREVS.values():
+        return m.group(1)
+    # Check for full state names
+    text_lower = text.lower()
+    for name, abbrev in _STATE_ABBREVS.items():
+        if name in text_lower:
+            return abbrev
+    return None
+
+
+def _build_synthetic_tool_calls(step_text: str, category: str, query: str) -> list[dict]:
+    """Build synthetic tool calls from a plan step when the LLM refuses.
+
+    Returns a list of tool_call dicts (name, args, id) based on keyword analysis.
+    Prioritizes step_text keywords; falls back to query keywords only for state
+    extraction and when step_text has no specific keywords.
+    """
+    calls = []
+    step_lower = step_text.lower()
+    query_lower = query.lower()
+    state = _extract_state_from_text(step_text) or _extract_state_from_text(query)
+
+    if category == "data" or "[data]" in step_lower:
+        # Match keywords from the STEP text first (more specific), then query
+        def _step_has(*kws: str) -> bool:
+            return any(kw in step_lower for kw in kws)
+
+        def _any_has(*kws: str) -> bool:
+            return any(kw in step_lower or kw in query_lower for kw in kws)
+
+        if _step_has("food insecur", "food access", "poverty", "snap",
+                     "food desert", "atlas", "laccess", "hunger",
+                     "food environment", "risk"):
+            args: dict = {"limit": 200}
+            if state:
+                args["state"] = state
+            calls.append({
+                "name": "query_food_atlas",
+                "args": args,
+                "id": f"synth_{uuid.uuid4().hex[:8]}",
+                "type": "tool_call",
+            })
+        if _step_has("census", "demograph", "population", "income", "median"):
+            args = {}
+            if state:
+                args["state_fips"] = state
+            args["variables"] = "B01003_001E,B19013_001E,B17001_002E"
+            calls.append({
+                "name": "query_census_acs",
+                "args": args,
+                "id": f"synth_{uuid.uuid4().hex[:8]}",
+                "type": "tool_call",
+            })
+        if _step_has("weather", "drought", "rain", "temperature", "precipitation"):
+            args = {}
+            if state:
+                args["state"] = state
+            calls.append({
+                "name": "query_weather",
+                "args": args,
+                "id": f"synth_{uuid.uuid4().hex[:8]}",
+                "type": "tool_call",
+            })
+        if _step_has("crop", "yield", "corn", "soybean", "wheat", "nass",
+                     "harvest", "production"):
+            args = {"source": "SURVEY"}
+            if state:
+                args["state_alpha"] = state
+            # Detect specific crop from step or query
+            for crop in ["CORN", "SOYBEANS", "WHEAT", "RICE", "COTTON"]:
+                if crop.lower() in step_lower or crop.lower() in query_lower:
+                    args["commodity_desc"] = crop
+                    break
+            calls.append({
+                "name": "query_nass",
+                "args": args,
+                "id": f"synth_{uuid.uuid4().hex[:8]}",
+                "type": "tool_call",
+            })
+        if _step_has("fema", "disaster", "flood", "tornado", "hurricane", "storm"):
+            args = {}
+            if state:
+                args["state"] = state
+            calls.append({
+                "name": "query_fema_disasters",
+                "args": args,
+                "id": f"synth_{uuid.uuid4().hex[:8]}",
+                "type": "tool_call",
+            })
+        # Fallback: if no step-specific keywords matched, use query keywords
+        if not calls:
+            if _any_has("food insecur", "poverty", "risk", "hunger"):
+                args = {"limit": 200}
+                if state:
+                    args["state"] = state
+                calls.append({
+                    "name": "query_food_atlas",
+                    "args": args,
+                    "id": f"synth_{uuid.uuid4().hex[:8]}",
+                    "type": "tool_call",
+                })
+            else:
+                # Ultimate fallback: food atlas
+                args = {"limit": 200}
+                if state:
+                    args["state"] = state
+                calls.append({
+                    "name": "query_food_atlas",
+                    "args": args,
+                    "id": f"synth_{uuid.uuid4().hex[:8]}",
+                    "type": "tool_call",
+                })
+
+    elif category == "analytics" or "[analytics]" in step_text.lower():
+        args = {}
+        if state:
+            args["state"] = state
+        calls.append({
+            "name": "build_feature_matrix",
+            "args": args,
+            "id": f"synth_{uuid.uuid4().hex[:8]}",
+            "type": "tool_call",
+        })
+
+    elif category == "route" or "[route]" in step_text.lower():
+        # Extract origin and destinations from step/query text.
+        # step_text arrives lowercased; use query for original casing where needed.
+        origin = "Cape Girardeau Hub"  # sensible MO default
+        destinations = ""
+
+        # Try to find "from <place>" pattern (case-insensitive on lowercase text)
+        from_match = re.search(r'\bfrom\s+([\w\s]+?)(?:\s+to\b|\s+and\b|$)', step_text, re.I)
+        if from_match:
+            origin = from_match.group(1).strip().title()
+
+        # Collect destination mentions: "to X, Y, and Z" → comma-separated list
+        to_match = re.search(r'\bto\s+(.+?)(?:\.|$)', step_text, re.I)
+        if to_match:
+            raw_dest = to_match.group(1).strip()
+            # Remove Oxford comma before "and", then replace " and " with ", "
+            raw_dest = re.sub(r',\s+and\s+', ', ', raw_dest, flags=re.I)
+            raw_dest = re.sub(r'\s+and\s+', ', ', raw_dest, flags=re.I)
+            # Collapse any double-commas and strip trailing punctuation
+            raw_dest = re.sub(r',\s*,+', ',', raw_dest).strip(", ")
+            # Title-case each destination to match route tool's location registry
+            destinations = ", ".join(p.strip().title() for p in raw_dest.split(",") if p.strip())
+
+        args: dict = {"origin": origin}
+        if destinations:
+            args["destinations"] = destinations
+
+        calls.append({
+            "name": "optimize_delivery_route",
+            "args": args,
+            "id": f"synth_{uuid.uuid4().hex[:8]}",
+            "type": "tool_call",
+        })
+
+    elif category == "sql" or "[sql]" in step_text.lower():
+        # For SQL steps, first list tables to orient the LLM, then query
+        calls.append({
+            "name": "list_tables",
+            "args": {},
+            "id": f"synth_{uuid.uuid4().hex[:8]}",
+            "type": "tool_call",
+        })
+
+    return calls
+
+
 def tool_caller_node(state: AgriFlowState) -> dict:
     """Route the current plan step to the appropriate specialized agent.
 
@@ -208,19 +408,62 @@ def tool_caller_node(state: AgriFlowState) -> dict:
         for i, s in enumerate(plan)
     )
 
+    # Count how many real ToolMessages we have (to detect data-starved plans)
+    tool_msg_count = sum(1 for m in state["messages"] if isinstance(m, ToolMessage))
+
+    # Force tool calls on ALL [data]/[analytics] tagged steps.
+    # The synthetic fallback will construct tool calls if the LLM ignores this.
+    force_tools = ""
+    step_text_lower = plan[step].lower() if step < len(plan) else ""
+    if "[data]" in step_text_lower:
+        force_tools = (
+            "\n\nCRITICAL: This is a [data] step. You MUST call at least one data "
+            "tool (query_food_atlas, query_food_access, query_nass, query_weather, "
+            "query_fema_disasters, query_census_acs). Do NOT respond with text only. "
+            "The downstream visualization steps DEPEND on real tool data being in "
+            "the message history. If you skip this, the charts will have no data."
+        )
+    elif "[analytics]" in step_text_lower:
+        force_tools = (
+            "\n\nCRITICAL: This is an [analytics] step. You MUST call analytics tools "
+            "(train_risk_model, predict_risk, build_feature_matrix, detect_anomalies, "
+            "explain_with_shap, etc.). Do NOT skip with a text-only response."
+        )
+    elif "[ml]" in step_text_lower:
+        force_tools = (
+            "\n\nCRITICAL: This is an [ml] step. You MUST call prediction/evaluation "
+            "tools (run_prediction, compute_evaluation_metrics, compare_scenarios). "
+            "Do NOT skip with a text-only response."
+        )
+    elif "[route]" in step_text_lower:
+        force_tools = (
+            "\n\nCRITICAL: This is a [route] step. You MUST call routing tools "
+            "(optimize_delivery_route, calculate_distance, create_route_map, "
+            "schedule_deliveries). Do NOT skip with a text-only response."
+        )
+    elif "[sql]" in step_text_lower:
+        force_tools = (
+            "\n\nCRITICAL: This is a [sql] step. You MUST call SQL tools "
+            "(list_tables, run_sql_query). Do NOT skip with a text-only response."
+        )
+
     plan_context = f"""
 Current execution plan:
 {plan_text}
 
 Previously collected data:
 {_summarize_tool_results(state.get('tool_results', {}))}
+Tool messages collected so far: {tool_msg_count}
 
 INSTRUCTIONS:
 1. Execute the tool call(s) specified in the CURRENT plan step (marked with >).
-2. If the current step is [viz], [route], [analytics], or [ml], you MUST call \
-the appropriate tool — NEVER skip these steps with a text-only response. For [viz] \
-steps, extract data from prior ToolMessage results and pass it as data_json.
-3. Only respond without tool calls if this is a [data] step AND the data is already available.
+2. You MUST call tools for [data], [viz], [route], [analytics], and [ml] steps.
+   NEVER skip these with a text-only response. The data you collect here is used
+   by downstream visualization and analysis steps.
+3. For [data] steps: ALWAYS call the appropriate query tool, even if you think
+   you know the answer. The visualization steps need REAL data from tool results,
+   not your training knowledge. Call query_food_atlas for food insecurity,
+   query_census_acs for demographics, query_nass for crop data, etc.
 4. CRITICAL: If a previous tool returned an error, you MUST self-correct and retry:
    - If a location/county was not found, try alternate names (city->county, abbreviations).
    - If an API returned no data, try different parameters (broader date range, different format).
@@ -229,46 +472,83 @@ steps, extract data from prior ToolMessage results and pass it as data_json.
    - ALWAYS attempt at least one retry with corrected parameters before giving up.
 5. Missouri city-to-county examples: Columbia=Boone, Springfield=Greene, Jefferson City=Cole,
    Joplin=Jasper, St. Joseph=Buchanan, Rolla=Phelps, Sedalia=Pettis.
-6. DIRECT ANSWERS: If the question is about general agricultural knowledge,
-   methodology, or interpretation that doesn't require specific data lookups,
-   answer directly without tool calls. Don't force tool usage when your
-   knowledge is sufficient. Examples: "What is tar spot?", "How does food
-   insecurity affect children?", "What crops grow best in clay soil?"
-   Provide a thorough, well-structured answer with headings and bullet points.
-7. NEVER DEFLECT: If tools return limited or no data, DO NOT respond with
-   "insufficient data" or "need more data." Instead, combine whatever data
+6. DIRECT ANSWERS: Only for steps that are explicitly about general knowledge
+   (NOT tagged [data], [viz], [analytics], [ml], [route]). If the step has a
+   category tag, you MUST call tools.
+7. NEVER DEFLECT: If tools return limited or no data, combine whatever data
    you have with your agricultural expertise to give a COMPLETE answer.
-   You know Midwest crop science, drought impacts, disease epidemiology,
-   USDA programs, and food system logistics. USE that knowledge to fill gaps.
-"""
-
-    messages = [
-        SystemMessage(content=AGRIFLOW_SYSTEM + "\n\n" + plan_context),
-        *state["messages"],
-    ]
-
-    # Invoke LLM with timeout to prevent hanging on API failures
-    LLM_TIMEOUT = 90  # seconds
-    try:
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(llm_with_tools.invoke, messages)
-            response = future.result(timeout=LLM_TIMEOUT)
-    except FuturesTimeoutError:
-        response = AIMessage(
-            content=(
-                "I apologize, but the request timed out. This can happen with complex "
-                "queries. Let me provide a direct answer based on what I know, or you "
-                "can try a more specific question."
-            )
-        )
+{force_tools}"""
 
     reasoning = state.get("reasoning_trace", [])
     reasoning.append(f"Router: step {step+1} -> [{cat_name}] ({n_tools} tools)")
-    if response.tool_calls:
-        for tc in response.tool_calls:
-            reasoning.append(f"Tool call: {tc['name']}({tc['args']})")
-    else:
-        reasoning.append("Analysis: LLM responded without tool calls (sufficient data)")
+
+    # --- SYNTHETIC TOOL CALLS for tagged steps ---
+    # The Archia LLM API hangs when tools are bound to the request.
+    # For tagged steps ([data], [analytics], [ml]), we skip the LLM and build
+    # tool calls directly from the step text keywords. This is faster and more
+    # reliable than waiting for an LLM that may timeout.
+    user_query = next(
+        (m.content for m in state["messages"] if isinstance(m, HumanMessage)), ""
+    )
+
+    # Check if we're returning from tool execution (last message is a ToolMessage).
+    # If so, don't re-trigger synthetic tool calls — tools already ran for this step.
+    last_msg = state["messages"][-1] if state["messages"] else None
+    coming_from_tools = isinstance(last_msg, ToolMessage)
+
+    needs_tools = bool(force_tools)
+    if needs_tools and coming_from_tools:
+        # Tool results are already in history — produce empty response to trigger
+        # advance_step (if more plan steps remain) or synthesizer.
+        response = AIMessage(content="")
+        reasoning.append(f"Synthetic: [{cat_name}] step {step+1} complete — tool results collected")
+    elif needs_tools:
+        # Skip LLM entirely — Archia hangs with tool binding.
+        # Build synthetic tool calls directly from step keywords.
+        reasoning.append(
+            f"Synthetic: [{cat_name}] step {step+1} — "
+            "building tool calls from step keywords"
+        )
+        synthetic_calls = _build_synthetic_tool_calls(
+            step_text_lower, category, user_query
+        )
+        if synthetic_calls:
+            response = AIMessage(content="", tool_calls=synthetic_calls)
+            for tc in synthetic_calls:
+                reasoning.append(f"Synthetic tool call: {tc['name']}({tc['args']})")
+        else:
+            response = AIMessage(content="")
+            reasoning.append("No synthetic calls could be built — proceeding with text")
+    else:  # not needs_tools
+        # Non-tagged step: use LLM text-only (no tools bound) for knowledge answers.
+        # Use a no-tools LLM to avoid Archia tool binding timeouts.
+        llm_no_tools = get_llm(model=SQL_MODEL, temperature=0.0)
+        messages = [
+            SystemMessage(content=AGRIFLOW_SYSTEM + "\n\n" + plan_context),
+            *state["messages"],
+        ]
+        LLM_TIMEOUT = 30  # seconds
+        _result_q: queue.Queue = queue.Queue()
+
+        def _llm_worker():
+            try:
+                _result_q.put(("ok", llm_no_tools.invoke(messages)))
+            except Exception as exc:
+                _result_q.put(("err", exc))
+
+        t = threading.Thread(target=_llm_worker, daemon=True, name="llm_text")
+        t.start()
+        try:
+            status, value = _result_q.get(timeout=LLM_TIMEOUT)
+            response = value if status == "ok" else AIMessage(content="")
+        except queue.Empty:
+            response = AIMessage(content="")
+
+        if response.tool_calls:
+            for tc in response.tool_calls:
+                reasoning.append(f"Tool call: {tc['name']}({tc['args']})")
+        else:
+            reasoning.append("Analysis: LLM provided text answer")
 
     return {
         "messages": [response],

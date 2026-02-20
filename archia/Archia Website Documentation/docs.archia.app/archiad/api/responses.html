@@ -1,0 +1,1061 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    
+<!-- Mirrored from docs.archia.app/archiad/api/responses.html by HTTrack Website Copier/3.x [XR&CO'2014], Thu, 19 Feb 2026 22:43:44 GMT -->
+<head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Responses API - Archia.io</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="Secure runtime environment for MCP agents">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../../favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="../../favicon-8114d1fc.png">
+        <link rel="stylesheet" href="../../css/variables-8adf115d.css">
+        <link rel="stylesheet" href="../../css/general-2459343d.css">
+        <link rel="stylesheet" href="../../css/chrome-ae938929.css">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../../fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="../../highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../../tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../../ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../../index.html";
+            const default_light_theme = "light";
+            const default_dark_theme = "ayu";
+            window.path_to_searchindex_js = "../../searchindex-0f3b809c.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../../toc-7e827e24.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../../toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Archia.io</h1>
+
+                    <div class="right-buttons">
+                        <a href="https://archia.io/" title="Git repository" aria-label="Git repository">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <h1 id="responses-api"><a class="header" href="#responses-api">Responses API</a></h1>
+<p>The Responses API is <strong>the recommended endpoint</strong> for generating model responses. It provides a modern, flexible
+interface compatible with OpenAI’s API format, supporting streaming, tool calling, and agent routing.</p>
+<blockquote>
+<p><strong>Recommended</strong>: Use the Responses API for all new integrations. It offers the most complete feature set and best
+developer experience.</p>
+</blockquote>
+<hr>
+<h2 id="create-response"><a class="header" href="#create-response">Create Response</a></h2>
+<p>Generates a model response for the given input.</p>
+<pre><code>POST /v1/responses
+</code></pre>
+<h3 id="request-body"><a class="header" href="#request-body">Request Body</a></h3>
+<pre><code class="language-json">{
+  "model": "agent:assistant",
+  "input": "What can you help me with today?"
+}
+</code></pre>
+<h3 id="limits-and-timeouts"><a class="header" href="#limits-and-timeouts">Limits and Timeouts</a></h3>
+<p>You can override server limits via <code>metadata</code>:</p>
+<pre><code class="language-json">{
+  "model": "claude-opus-4-5-20251101",
+  "input": "Summarize the last three games",
+  "metadata": {
+    "tool_limits": { "max_tool_calls": 8 },
+    "timeout_ms": 120000
+  }
+}
+</code></pre>
+<p>Resolution order:</p>
+<ul>
+<li><code>metadata.tool_limits.max_tool_calls</code> → request <code>max_tool_calls</code> → server config defaults</li>
+<li><code>metadata.timeout_ms</code> → server config defaults</li>
+</ul>
+<h3 id="metadata-extensions"><a class="header" href="#metadata-extensions">Metadata Extensions</a></h3>
+<p>The <code>metadata</code> object supports additional fields for agent routing:</p>
+<ul>
+<li><code>metadata.tool_headers</code> → per-request header overrides for agent MCP tools</li>
+<li><code>metadata.prompt_vars</code> → simple <code>{{key}}</code> substitutions in the agent system prompt</li>
+</ul>
+<h4 id="per-request-tool-headers-agent-tools"><a class="header" href="#per-request-tool-headers-agent-tools">Per-request tool headers (agent tools)</a></h4>
+<pre><code class="language-json">{
+  "model": "agent:assistant",
+  "input": "Check the request id",
+  "metadata": {
+    "tool_headers": {
+      "get-request-id": {
+        "trace_id": "abc123",
+        "request_id": "req-456"
+      }
+    }
+  }
+}
+</code></pre>
+<h4 id="system-prompt-variables-agent-only"><a class="header" href="#system-prompt-variables-agent-only">System prompt variables (agent only)</a></h4>
+<pre><code class="language-json">{
+  "model": "agent:assistant",
+  "input": "What can you do?",
+  "metadata": {
+    "prompt_vars": {
+      "user_id": "u_123",
+      "tenant": "acme"
+    }
+  }
+}
+</code></pre>
+<p>If the agent system prompt contains <code>{{user_id}}</code> or <code>{{tenant}}</code>, they are replaced with the provided values.</p>
+<h3 id="parameters"><a class="header" href="#parameters">Parameters</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>model</code></td><td>string</td><td>Yes</td><td>Model ID (see <a href="models.html">Supported Models</a>), <code>agent:{agent_name}</code> for agent routing, or <code>agent:{agent_name}:{model_override}</code> to override an agent’s model</td></tr>
+<tr><td><code>input</code></td><td>string/array</td><td>No</td><td>Text input or array of input items</td></tr>
+<tr><td><code>instructions</code></td><td>string</td><td>No</td><td>System prompt / developer message</td></tr>
+<tr><td><code>stream</code></td><td>boolean</td><td>No</td><td>Enable streaming responses (default: false)</td></tr>
+<tr><td><code>max_output_tokens</code></td><td>integer</td><td>No</td><td>Maximum tokens to generate</td></tr>
+<tr><td><code>store</code></td><td>boolean</td><td>No</td><td>Store the response for later retrieval</td></tr>
+<tr><td><code>metadata</code></td><td>object</td><td>No</td><td>Request metadata (see <a href="#metadata-extensions">Metadata Extensions</a>)</td></tr>
+<tr><td><code>previous_response_id</code></td><td>string</td><td>No</td><td>Chain responses in a conversation</td></tr>
+<tr><td><code>reasoning</code></td><td>object</td><td>No</td><td>Enable extended thinking/reasoning (see <a href="#reasoning">Reasoning</a>)</td></tr>
+<tr><td><code>tools</code></td><td>array</td><td>No</td><td>Tools the model may call (function or MCP tools)</td></tr>
+<tr><td><code>tool_choice</code></td><td>string/object</td><td>No</td><td>How model selects tools</td></tr>
+<tr><td><code>parallel_tool_calls</code></td><td>boolean</td><td>No</td><td>Allow parallel tool calls</td></tr>
+<tr><td><code>max_tool_calls</code></td><td>integer</td><td>No</td><td>Maximum number of tool calls (fallback if not provided in metadata)</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="reasoning"><a class="header" href="#reasoning">Reasoning</a></h2>
+<p>The <code>reasoning</code> parameter enables extended thinking capabilities for supported models. When enabled, the model will
+perform additional reasoning steps before generating its response, which can improve quality for complex tasks.</p>
+<h3 id="basic-usage"><a class="header" href="#basic-usage">Basic Usage</a></h3>
+<pre><code class="language-json">{
+  "model": "claude-sonnet-4-5-20250929",
+  "input": "Solve this step by step: If a train travels 120 miles in 2 hours, then stops for 30 minutes, then travels another 90 miles in 1.5 hours, what is the average speed for the entire journey?",
+  "reasoning": {
+    "effort": "medium"
+  }
+}
+</code></pre>
+<h3 id="reasoning-parameters"><a class="header" href="#reasoning-parameters">Reasoning Parameters</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>effort</code></td><td>string</td><td>Yes</td><td>Reasoning intensity: <code>"none"</code>, <code>"low"</code>, <code>"medium"</code>, or <code>"high"</code></td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="effort-levels"><a class="header" href="#effort-levels">Effort Levels</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Level</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>none</code></td><td>Disable reasoning (supported by OpenAI gpt-5.0+)</td></tr>
+<tr><td><code>low</code></td><td>Light reasoning, suitable for simpler problems</td></tr>
+<tr><td><code>medium</code></td><td>Balanced reasoning for most tasks</td></tr>
+<tr><td><code>high</code></td><td>Maximum reasoning depth for complex problems</td></tr>
+</tbody>
+</table>
+</div>
+<blockquote>
+<p><strong>Note</strong>: If the <code>reasoning</code> parameter is omitted, the provider’s default behavior is used. For OpenAI gpt-5.1+, the default is <code>"none"</code> (no reasoning).</p>
+</blockquote>
+<h3 id="supported-models"><a class="header" href="#supported-models">Supported Models</a></h3>
+<p>Reasoning is supported on models with the <code>reasoning</code> capability:</p>
+<ul>
+<li><strong>Anthropic</strong>: Claude Sonnet 3.7+, Claude Sonnet 4+, Claude Opus 4+</li>
+<li><strong>Google</strong>: Gemini 2.5 Pro, Gemini 2.5 Flash, Gemini 3.0 Pro</li>
+<li><strong>OpenAI</strong>: GPT-5.x, o-series models (o1, o3, o4)</li>
+</ul>
+<blockquote>
+<p><strong>Note</strong>: GPT-4.x models do <strong>not</strong> support the <code>reasoning</code> parameter and will return an error if it’s provided. The <code>reasoning</code> parameter is silently ignored for unsupported models.</p>
+</blockquote>
+<h3 id="provider-specific-behavior"><a class="header" href="#provider-specific-behavior">Provider-Specific Behavior</a></h3>
+<p>Different providers implement reasoning differently:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Provider</th><th><code>none</code></th><th><code>low</code></th><th><code>medium</code></th><th><code>high</code></th><th>Default (not specified)</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>OpenAI</strong> (gpt-5.0+)</td><td>No reasoning</td><td>Minimal reasoning</td><td>Balanced reasoning</td><td>Maximum reasoning</td><td><code>none</code> (gpt-5.1)</td></tr>
+<tr><td><strong>gpt-oss</strong> (local)</td><td>Maps to <code>low</code></td><td>Low thinking</td><td>Medium thinking</td><td>High thinking</td><td><code>medium</code></td></tr>
+<tr><td><strong>Anthropic</strong></td><td>Disables thinking</td><td>~1K token budget</td><td>~8K token budget</td><td>~24K token budget</td><td>No thinking</td></tr>
+<tr><td><strong>Google</strong></td><td>Maps to <code>low</code></td><td>Low budget</td><td>Medium budget</td><td>High budget</td><td>Provider default</td></tr>
+</tbody>
+</table>
+</div>
+<blockquote>
+<p><strong>Note</strong>: gpt-oss models don’t support fully disabling reasoning - <code>"none"</code> maps to <code>"low"</code> (minimal reasoning).</p>
+</blockquote>
+<h3 id="example-with-streaming"><a class="header" href="#example-with-streaming">Example with Streaming</a></h3>
+<pre><code class="language-json">{
+  "model": "claude-sonnet-4-5-20250929",
+  "input": "Explain the proof of the Pythagorean theorem",
+  "reasoning": {
+    "effort": "high"
+  },
+  "stream": true
+}
+</code></pre>
+<p>When streaming with reasoning enabled, you’ll receive <code>response.reasoning_summary_text.delta</code> events containing
+the model’s reasoning process, followed by the regular response content.</p>
+<hr>
+<h2 id="direct-model-calls"><a class="header" href="#direct-model-calls">Direct Model Calls</a></h2>
+<p>You can call models directly by specifying the model ID and optionally including MCP tools inline:</p>
+<pre><code class="language-json">{
+  "model": "gpt-5.2",
+  "input": [
+    {
+      "role": "user",
+      "content": "Roll 2d4+1"
+    }
+  ],
+  "tools": [
+    {
+      "type": "mcp",
+      "server_label": "dmcp",
+      "server_description": "A Dungeons and Dragons MCP server to assist with dice rolling.",
+      "server_url": "https://dmcp-server.deno.dev/sse",
+      "require_approval": "never"
+    }
+  ]
+}
+</code></pre>
+<h3 id="mcp-tool-parameters"><a class="header" href="#mcp-tool-parameters">MCP Tool Parameters</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>type</code></td><td>string</td><td>Yes</td><td>Must be <code>"mcp"</code></td></tr>
+<tr><td><code>server_label</code></td><td>string</td><td>Yes</td><td>Identifier for the MCP server</td></tr>
+<tr><td><code>server_description</code></td><td>string</td><td>No</td><td>Description of what the server provides</td></tr>
+<tr><td><code>server_url</code></td><td>string</td><td>Yes</td><td>URL of the MCP server (SSE endpoint)</td></tr>
+<tr><td><code>require_approval</code></td><td>string</td><td>No</td><td>Approval mode: <code>"never"</code>, <code>"always"</code>, or <code>"auto"</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>This approach is useful when you want to:</p>
+<ul>
+<li>Use a specific model without agent configuration</li>
+<li>Dynamically specify MCP tools per request</li>
+<li>Test new tools without modifying agent config</li>
+</ul>
+<hr>
+<h2 id="agent-routing"><a class="header" href="#agent-routing">Agent Routing</a></h2>
+<p>The recommended way to use the Responses API is through <strong>agent routing</strong>. Use the <code>model</code> field to route requests to
+configured agents:</p>
+<pre><code class="language-json">{
+  "model": "agent:assistant",
+  "input": "Help me with my task"
+}
+</code></pre>
+<p>This routes to the agent named “assistant” and uses its configured model, system prompt, and tool access.</p>
+<p><strong>Benefits of agent routing:</strong></p>
+<ul>
+<li>Pre-configured system prompts</li>
+<li>Automatic MCP tool access</li>
+<li>Centralized agent management</li>
+<li>No need to specify model or instructions per request</li>
+</ul>
+<h3 id="model-override"><a class="header" href="#model-override">Model Override</a></h3>
+<p>You can override an agent’s configured model while still using its system prompt and tools by appending the model name:</p>
+<pre><code>agent:{agent_name}:{model_override}
+</code></pre>
+<p><strong>Examples:</strong></p>
+<pre><code class="language-json">// Use agent's default model
+{
+  "model": "agent:assistant",
+  "input": "Hello!"
+}
+
+// Override with Claude
+{
+  "model": "agent:assistant:claude-haiku-4-5-20251001",
+  "input": "Hello!"
+}
+
+// Override with gpt-5.2
+{
+  "model": "agent:assistant:gpt-5.2",
+  "input": "Hello!"
+}
+</code></pre>
+<p>This is useful when you want to:</p>
+<ul>
+<li>Test an agent’s prompts and tools with different models</li>
+<li>Use a faster/cheaper model for simple tasks</li>
+<li>Use a more capable model for complex tasks</li>
+<li>A/B test model performance with the same agent configuration</li>
+</ul>
+<hr>
+<h2 id="response-format"><a class="header" href="#response-format">Response Format</a></h2>
+<h3 id="non-streaming-response"><a class="header" href="#non-streaming-response">Non-Streaming Response</a></h3>
+<pre><code class="language-json">{
+  "id": "resp_abc123",
+  "object": "response",
+  "created_at": 1705312200,
+  "status": "completed",
+  "model": "claude-sonnet-4-5-20250929",
+  "output": [
+    {
+      "type": "message",
+      "id": "msg_xyz789",
+      "status": "completed",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "The capital of France is Paris."
+        }
+      ]
+    }
+  ],
+  "usage": {
+    "input_tokens": 25,
+    "output_tokens": 12,
+    "total_tokens": 37
+  }
+}
+</code></pre>
+<h3 id="response-with-reasoning"><a class="header" href="#response-with-reasoning">Response with Reasoning</a></h3>
+<p>When <code>reasoning</code> is enabled, the response includes a reasoning output item before the message:</p>
+<pre><code class="language-json">{
+  "id": "resp_abc123",
+  "object": "response",
+  "created_at": 1705312200,
+  "status": "completed",
+  "model": "claude-sonnet-4-5-20250929",
+  "output": [
+    {
+      "type": "reasoning",
+      "id": "reasoning_def456",
+      "status": "completed",
+      "summary": [
+        {
+          "type": "summary_text",
+          "text": "To solve this problem, I need to calculate the total distance and total time..."
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "id": "msg_xyz789",
+      "status": "completed",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "The average speed for the entire journey is 42 mph."
+        }
+      ]
+    }
+  ],
+  "usage": {
+    "input_tokens": 45,
+    "output_tokens": 156,
+    "total_tokens": 201
+  }
+}
+</code></pre>
+<h3 id="response-fields"><a class="header" href="#response-fields">Response Fields</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>id</code></td><td>string</td><td>Unique response identifier</td></tr>
+<tr><td><code>object</code></td><td>string</td><td>Always “response”</td></tr>
+<tr><td><code>created_at</code></td><td>integer</td><td>Unix timestamp of creation</td></tr>
+<tr><td><code>status</code></td><td>string</td><td>One of: <code>completed</code>, <code>failed</code>, <code>in_progress</code>, <code>cancelled</code></td></tr>
+<tr><td><code>model</code></td><td>string</td><td>Model used for generation</td></tr>
+<tr><td><code>output</code></td><td>array</td><td>Array of output items (messages, reasoning, function calls)</td></tr>
+<tr><td><code>usage</code></td><td>object</td><td>Token usage statistics</td></tr>
+<tr><td><code>error</code></td><td>object</td><td>Error details if status is “failed”</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="output-item-types"><a class="header" href="#output-item-types">Output Item Types</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>message</code></td><td>Assistant’s response message with text content</td></tr>
+<tr><td><code>reasoning</code></td><td>Model’s reasoning/thinking process (when reasoning enabled)</td></tr>
+<tr><td><code>function_call</code></td><td>A tool/function call made by the model</td></tr>
+<tr><td><code>function_call_output</code></td><td>Result from a tool/function call</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="streaming"><a class="header" href="#streaming">Streaming</a></h2>
+<p>When <code>stream: true</code>, the endpoint returns Server-Sent Events (SSE):</p>
+<pre><code class="language-bash">curl -X POST http://localhost:8080/v1/responses \
+  -H "Content-Type: application/json" \
+  -H "Accept: text/event-stream" \
+  -d '{
+    "model": "agent:assistant",
+    "input": "Tell me a story",
+    "stream": true
+  }'
+</code></pre>
+<h3 id="event-types"><a class="header" href="#event-types">Event Types</a></h3>
+<pre><code>event: response.created
+data: {"id":"resp_abc123","object":"response","status":"in_progress",...}
+
+event: response.output_item.added
+data: {"type":"message","id":"msg_xyz789","role":"assistant",...}
+
+event: response.content_part.added
+data: {"type":"output_text","text":""}
+
+event: response.output_text.delta
+data: {"delta":"Once upon"}
+
+event: response.output_text.delta
+data: {"delta":" a time..."}
+
+event: response.output_text.done
+data: {"text":"Once upon a time..."}
+</code></pre>
+<h4 id="reasoning-events-when-reasoning-is-enabled"><a class="header" href="#reasoning-events-when-reasoning-is-enabled">Reasoning Events (when <code>reasoning</code> is enabled)</a></h4>
+<p>When reasoning is enabled, additional events are sent before the main response content:</p>
+<pre><code>event: response.reasoning_summary_part.added
+data: {"item_id":"reasoning_abc","output_index":0,"summary_index":0,"part":{"type":"summary_text","text":""}}
+
+event: response.reasoning_summary_text.delta
+data: {"item_id":"reasoning_abc","output_index":0,"summary_index":0,"delta":"Let me think through this..."}
+
+event: response.reasoning_summary_text.delta
+data: {"item_id":"reasoning_abc","output_index":0,"summary_index":0,"delta":" First, I need to consider..."}
+
+event: response.reasoning_summary_text.done
+data: {"item_id":"reasoning_abc","output_index":0,"summary_index":0,"text":"Let me think through this... First, I need to consider..."}
+</code></pre>
+<p>event: response.output_item.done
+data: {“type”:“message”,“id”:“msg_xyz789”,“status”:“completed”,…}</p>
+<p>event: response.completed
+data: {“id”:“resp_abc123”,“status”:“completed”,“usage”:{…}}</p>
+<pre><code>
+### Event Sequence
+
+Standard sequence:
+
+1. `response.created` - Response object created
+2. `response.output_item.added` - New output item (message or function call)
+3. `response.content_part.added` - New content part added
+4. `response.output_text.delta` - Text chunk (repeated)
+5. `response.output_text.done` - Text content complete
+6. `response.output_item.done` - Output item complete
+7. `response.completed` - Full response complete
+
+With reasoning enabled, reasoning events appear after `response.created` and before the main content:
+
+1. `response.created`
+2. `response.reasoning_summary_part.added` - Reasoning output started
+3. `response.reasoning_summary_text.delta` - Reasoning text chunk (repeated)
+4. `response.reasoning_summary_text.done` - Reasoning complete
+5. `response.output_item.added` - Main response content begins
+6. ... (standard content events)
+7. `response.completed`
+
+---
+
+## Conversation Chaining
+
+Chain multiple responses together using `previous_response_id` to maintain conversation context:
+
+```bash
+# First message
+curl -X POST http://localhost:8080/v1/responses \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "agent:assistant",
+    "input": "What is machine learning?"
+  }'
+# Response includes "id": "resp_abc123"
+
+# Follow-up message
+curl -X POST http://localhost:8080/v1/responses \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "agent:assistant",
+    "previous_response_id": "resp_abc123",
+    "input": "Can you give me a specific example?"
+  }'
+</code></pre>
+<hr>
+<h2 id="examples"><a class="header" href="#examples">Examples</a></h2>
+<h3 id="chat-with-an-agent"><a class="header" href="#chat-with-an-agent">Chat with an Agent</a></h3>
+<pre><code class="language-bash">curl -X POST http://localhost:8080/v1/responses \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "agent:assistant",
+    "input": "Hello! What can you help me with?"
+  }'
+</code></pre>
+<h3 id="agent-with-model-override"><a class="header" href="#agent-with-model-override">Agent with Model Override</a></h3>
+<pre><code class="language-bash">curl -X POST http://localhost:8080/v1/responses \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "agent:assistant:gpt-5.2",
+    "input": "Hello! What can you help me with?"
+  }'
+</code></pre>
+<h3 id="streaming-chat"><a class="header" href="#streaming-chat">Streaming Chat</a></h3>
+<pre><code class="language-bash">curl -X POST http://localhost:8080/v1/responses \
+  -H "Content-Type: application/json" \
+  -H "Accept: text/event-stream" \
+  -d '{
+    "model": "agent:assistant",
+    "input": "Explain how APIs work",
+    "stream": true
+  }'
+</code></pre>
+<h3 id="multi-turn-conversation"><a class="header" href="#multi-turn-conversation">Multi-turn Conversation</a></h3>
+<pre><code class="language-bash"># Ask a question
+curl -X POST http://localhost:8080/v1/responses \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "agent:researcher",
+    "input": "What are the main causes of climate change?"
+  }'
+
+# Follow up (using the response ID from above)
+curl -X POST http://localhost:8080/v1/responses \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "agent:researcher",
+    "previous_response_id": "resp_abc123",
+    "input": "What solutions are being proposed?"
+  }'
+</code></pre>
+<h3 id="direct-model-with-mcp-tools"><a class="header" href="#direct-model-with-mcp-tools">Direct Model with MCP Tools</a></h3>
+<pre><code class="language-bash">curl -X POST http://localhost:8080/v1/responses \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer &lt;token&gt;" \
+  -d '{
+    "model": "gpt-5.2",
+    "input": [
+      {
+        "role": "user",
+        "content": "Roll 2d4+1 for damage"
+      }
+    ],
+    "tools": [
+      {
+        "type": "mcp",
+        "server_label": "dmcp",
+        "server_description": "A D&amp;D MCP server for dice rolling",
+        "server_url": "https://dmcp-server.deno.dev/sse",
+        "require_approval": "never",
+        "headers": {
+          "X-API-Key": "your-api-key"
+        },
+        "tool_call_values": {
+          "player_id": "player_123"
+        }
+      }
+    ]
+  }'
+</code></pre>
+<h3 id="using-the-openai-sdk"><a class="header" href="#using-the-openai-sdk">Using the OpenAI SDK</a></h3>
+<p>The Responses API is compatible with the OpenAI SDK:</p>
+<pre><code class="language-python">from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key="not-used",  # Archia uses Basic auth
+    default_headers={"Authorization": "Basic &lt;credentials&gt;"}
+)
+
+response = client.responses.create(
+    model="agent:assistant",
+    input="What's the weather like today?"
+)
+
+print(response.output[0].content[0].text)
+</code></pre>
+<pre><code class="language-typescript">import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: "not-used",
+  defaultHeaders: { Authorization: "Basic &lt;credentials&gt;" },
+});
+
+const response = await client.responses.create({
+  model: "agent:assistant",
+  input: "What's the weather like today?",
+});
+
+console.log(response.output[0].content[0].text);
+</code></pre>
+<hr>
+<h2 id="langfuse-integration"><a class="header" href="#langfuse-integration">Langfuse Integration</a></h2>
+<p><a href="https://langfuse.com/">Langfuse</a> provides observability for LLM applications. You can trace Archia API calls to monitor
+performance, debug issues, and analyze usage.</p>
+<h3 id="python-with-langfuse"><a class="header" href="#python-with-langfuse">Python with Langfuse</a></h3>
+<pre><code class="language-python">from openai import OpenAI
+from langfuse import Langfuse
+
+# Initialize clients
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key="not-used",
+    default_headers={"Authorization": "Basic &lt;credentials&gt;"}
+)
+
+langfuse = Langfuse(
+    public_key="pk-lf-...",
+    secret_key="sk-lf-...",
+    host="http://localhost:3000"
+)
+
+# Create a trace
+trace = langfuse.trace(
+    name="chat-with-agent",
+    input={"prompt": "Hello!"},
+    tags=["archia", "assistant"]
+)
+
+# Create a generation span
+generation = trace.generation(
+    name="responses-api-call",
+    model="agent:assistant",
+    input="Hello!"
+)
+
+# Make the API call
+response = client.responses.create(
+    model="agent:assistant",
+    input="Hello!"
+)
+
+# Extract output and complete the trace
+output_text = response.output[0].content[0].text
+generation.end(
+    output=output_text,
+    usage={
+        "input": response.usage.input_tokens,
+        "output": response.usage.output_tokens,
+        "total": response.usage.total_tokens
+    }
+)
+
+# Flush traces
+langfuse.flush()
+</code></pre>
+<h3 id="typescript-with-langfuse"><a class="header" href="#typescript-with-langfuse">TypeScript with Langfuse</a></h3>
+<pre><code class="language-typescript">import OpenAI from "openai";
+import Langfuse from "langfuse";
+
+const client = new OpenAI({
+  baseURL: "http://localhost:8080/v1",
+  apiKey: "not-used",
+  defaultHeaders: { Authorization: "Basic &lt;credentials&gt;" },
+});
+
+const langfuse = new Langfuse({
+  publicKey: "pk-lf-...",
+  secretKey: "sk-lf-...",
+  baseUrl: "http://localhost:3000",
+});
+
+// Create a trace
+const trace = langfuse.trace({
+  name: "chat-with-agent",
+  input: { prompt: "Hello!" },
+  tags: ["archia", "assistant"],
+});
+
+// Create a generation span
+const generation = trace.generation({
+  name: "responses-api-call",
+  model: "agent:assistant",
+  input: "Hello!",
+});
+
+// Make the API call
+const response = await client.responses.create({
+  model: "agent:assistant",
+  input: "Hello!",
+});
+
+// Extract output and complete the trace
+const outputText = response.output[0].content[0].text;
+generation.end({
+  output: outputText,
+  usage: {
+    input: response.usage.input_tokens,
+    output: response.usage.output_tokens,
+    total: response.usage.total_tokens,
+  },
+});
+
+// Flush traces
+await langfuse.flushAsync();
+</code></pre>
+<h3 id="python-with-langfuse-annotations"><a class="header" href="#python-with-langfuse-annotations">Python with Langfuse Annotations</a></h3>
+<p>Using the <code>@observe</code> decorator for automatic tracing:</p>
+<pre><code class="language-python">from openai import OpenAI
+from langfuse import Langfuse
+from langfuse.decorators import observe
+
+# Initialize clients
+client = OpenAI(
+    base_url="http://localhost:8080/v1",
+    api_key="not-used",
+    default_headers={"Authorization": "Basic &lt;credentials&gt;"}
+)
+
+langfuse = Langfuse(
+    public_key="pk-lf-...",
+    secret_key="sk-lf-...",
+    host="http://localhost:3000"
+)
+
+@observe(name="chat_with_agent")
+def chat_with_agent(prompt: str, agent: str = "assistant") -&gt; str:
+    """Chat with an agent and return the response."""
+    response = client.responses.create(
+        model=f"agent:{agent}",
+        input=prompt
+    )
+    
+    output_text = response.output[0].content[0].text
+    return output_text
+
+@observe(name="multi_turn_conversation")
+def multi_turn_conversation(messages: list[dict]) -&gt; str:
+    """Have a multi-turn conversation with an agent."""
+    previous_response_id = None
+    
+    for msg in messages:
+        if previous_response_id:
+            response = client.responses.create(
+                model="agent:assistant",
+                previous_response_id=previous_response_id,
+                input=msg["content"]
+            )
+        else:
+            response = client.responses.create(
+                model="agent:assistant",
+                input=msg["content"]
+            )
+        
+        previous_response_id = response.id
+    
+    return response.output[0].content[0].text
+
+@observe(name="direct_model_call_with_tools")
+def direct_model_call_with_tools(prompt: str) -&gt; str:
+    """Call a model directly with MCP tools."""
+    response = client.responses.create(
+        model="gpt-5.2",
+        input=[{"role": "user", "content": prompt}],
+        tools=[
+            {
+                "type": "mcp",
+                "server_label": "dmcp",
+                "server_description": "A Dungeons and Dragons MCP server",
+                "server_url": "https://dmcp-server.deno.dev/sse",
+                "require_approval": "never"
+            }
+        ]
+    )
+    
+    return response.output[0].content[0].text
+
+# Usage examples
+if __name__ == "__main__":
+    # Simple chat
+    result = chat_with_agent("What is machine learning?")
+    print(result)
+    
+    # Multi-turn conversation
+    messages = [
+        {"role": "user", "content": "What is machine learning?"},
+        {"role": "user", "content": "Can you give me a specific example?"}
+    ]
+    result = multi_turn_conversation(messages)
+    print(result)
+    
+    # Direct model call with tools
+    result = direct_model_call_with_tools("Roll 2d4+1 for damage")
+    print(result)
+    
+    # Flush traces to Langfuse
+    langfuse.flush()
+</code></pre>
+<p>The <code>@observe</code> decorator automatically:</p>
+<ul>
+<li>Creates a trace for each function call</li>
+<li>Captures input and output</li>
+<li>Measures execution time</li>
+<li>Logs any errors that occur</li>
+<li>Tracks nested function calls as child spans</li>
+</ul>
+<h3 id="what-langfuse-captures"><a class="header" href="#what-langfuse-captures">What Langfuse Captures</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>Model</strong></td><td>Agent name (e.g., <code>agent:assistant</code>)</td></tr>
+<tr><td><strong>Input</strong></td><td>The prompt sent to the API</td></tr>
+<tr><td><strong>Output</strong></td><td>The response text</td></tr>
+<tr><td><strong>Usage</strong></td><td>Token counts (input, output, total)</td></tr>
+<tr><td><strong>Tags</strong></td><td>Filterable tags for organizing traces</td></tr>
+<tr><td><strong>Latency</strong></td><td>Request duration</td></tr>
+<tr><td><strong>Metadata</strong></td><td>Custom context and attributes</td></tr>
+</tbody>
+</table>
+</div>
+<p>For complete examples, see the <code>poc/shottracker/langfuse/</code> directory which includes full Python and TypeScript
+implementations.</p>
+<hr>
+<h2 id="error-handling"><a class="header" href="#error-handling">Error Handling</a></h2>
+<h3 id="error-response"><a class="header" href="#error-response">Error Response</a></h3>
+<pre><code class="language-json">{
+  "id": "resp_abc123",
+  "status": "failed",
+  "error": {
+    "error_type": "invalid_request",
+    "message": "Agent 'unknown-agent' not found"
+  }
+}
+</code></pre>
+<h3 id="common-errors"><a class="header" href="#common-errors">Common Errors</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Error Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>invalid_request</code></td><td>Malformed request or invalid parameters</td></tr>
+<tr><td><code>agent_not_found</code></td><td>Agent routing failed - agent doesn’t exist</td></tr>
+<tr><td><code>rate_limit_exceeded</code></td><td>Too many requests</td></tr>
+<tr><td><code>context_length_exceeded</code></td><td>Input too long for model</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="next-steps"><a class="header" href="#next-steps">Next Steps</a></h2>
+<ul>
+<li><strong><a href="agents.html">Agents API →</a></strong> - Manage agent configurations</li>
+<li><strong><a href="tools.html">Tools API →</a></strong> - Configure MCP tools</li>
+<li><strong><a href="../../agent-configuration.html">Agent Configuration →</a></strong> - Set up agents for routing</li>
+</ul>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="index.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                            </a>
+
+                            <a rel="next prefetch" href="models.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="index.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                    </a>
+
+                    <a rel="next prefetch" href="models.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                    </a>
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../../elasticlunr-ef4e11c1.min.js"></script>
+        <script src="../../mark-09e88c2c.min.js"></script>
+        <script src="../../searcher-c2a407aa.js"></script>
+
+        <script src="../../clipboard-1626706a.min.js"></script>
+        <script src="../../highlight-abc7f01d.js"></script>
+        <script src="../../book-a0b12cfe.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+
+    </div>
+    </body>
+
+<!-- Mirrored from docs.archia.app/archiad/api/responses.html by HTTrack Website Copier/3.x [XR&CO'2014], Thu, 19 Feb 2026 22:43:44 GMT -->
+</html>

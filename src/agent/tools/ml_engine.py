@@ -25,9 +25,12 @@ import joblib
 import numpy as np
 import pandas as pd
 from langchain_core.tools import tool
-from sklearn.ensemble import IsolationForest, RandomForestRegressor
-from sklearn.model_selection import cross_val_score
-from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import GradientBoostingRegressor, IsolationForest, RandomForestRegressor
+from sklearn.linear_model import LinearRegression
+from sklearn.model_selection import cross_val_score, train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
+from sklearn.svm import SVR
 
 try:
     import xgboost as xgb
@@ -149,12 +152,21 @@ def build_feature_matrix(
         return [{"error": "No food_environment data found. Run data pipeline first."}]
 
     # Numeric columns from food_environment
+    # Ordered: Suyog 6-feature set first (21-23 data), then legacy 15-17 fallbacks
     feature_cols = [
-        "PCT_LACCESS_POP15", "FOODINSEC_15_17", "PCT_OBESE_ADULTS17",
-        "POVRATE15", "PCT_SNAP16", "PCT_NSLP15", "PCT_FREE_LUNCH15",
-        "PCT_REDUCED_LUNCH15", "PCT_LACCESS_CHILD15", "PCT_LACCESS_SENIORS15",
-        "PCT_LACCESS_HHNV15", "PCT_LACCESS_SNAP15",
-        "GROC16", "SUPERC16", "CONVS16", "SPECS16", "SNAPS17", "WICS16",
+        # Suyog validated features (6-feature composite risk score)
+        "FOODINSEC_18_20", "FOODINSEC_21_23", "POVRATE21",
+        "PCT_SNAP22", "PCT_WICWOMEN16", "LACCESS_HHNV19",
+        # Additional predictive features
+        "VLFOODSEC_21_23", "MEDHHINC21", "CHILDPOVRATE21",
+        "PCT_LACCESS_POP15", "PCT_LACCESS_HHNV15", "PCT_LACCESS_HHNV19",
+        "PCT_LACCESS_CHILD15", "PCT_LACCESS_SENIORS15", "PCT_LACCESS_SNAP15",
+        "PCT_OBESE_ADULTS17", "PCT_OBESE_ADULTS22",
+        "PCT_FREE_LUNCH15", "PCT_REDUCED_LUNCH15",
+        "PCT_SNAP17", "PCT_WICWOMEN21", "WICS16", "WICS22",
+        "GROC16", "SUPERC16", "CONVS16", "SPECS16", "SNAPS17",
+        # Legacy fallbacks (may not exist in newer atlas versions)
+        "FOODINSEC_15_17", "POVRATE15", "PCT_SNAP16",
     ]
 
     # Keep only columns that exist
@@ -170,20 +182,32 @@ def build_feature_matrix(
         median = df[col].median()
         df[col] = df[col].fillna(median if not pd.isna(median) else 0)
 
-    # Derived features
+    # Derived features (Suyog 4 interaction features)
+    _pov  = next((c for c in ["POVRATE21", "POVRATE15"] if c in df.columns), None)
+    _snap = next((c for c in ["PCT_SNAP22", "PCT_SNAP17", "PCT_SNAP16"] if c in df.columns), None)
+    _food = next((c for c in ["FOODINSEC_21_23", "FOODINSEC_18_20", "FOODINSEC_15_17"] if c in df.columns), None)
+    _acc  = next((c for c in ["LACCESS_HHNV19", "PCT_LACCESS_HHNV15"] if c in df.columns), None)
+
+    if _pov and _snap:
+        df["POVxSNAP"] = (
+            df[_pov].fillna(0) * df[_snap].fillna(0) / 100
+        ).round(4)
+    if _pov and _acc:
+        df["POVxLACCESS"] = (
+            df[_pov].fillna(0) * df[_acc].fillna(0) / 100
+        ).round(4)
+    if _food and _snap:
+        df["FOODxSNAP"] = (
+            df[_food].fillna(0) * df[_snap].fillna(0) / 100
+        ).round(4)
+    if _snap and _acc:
+        df["SNAPxLACCESS"] = (
+            df[_snap].fillna(0) * df[_acc].fillna(0) / 100
+        ).round(4)
+
     if "GROC16" in df.columns and "CONVS16" in df.columns:
         df["grocery_to_conv_ratio"] = (
             df["GROC16"] / df["CONVS16"].replace(0, 1)
-        ).round(3)
-
-    if "PCT_LACCESS_POP15" in df.columns and "POVRATE15" in df.columns:
-        df["access_poverty_interaction"] = (
-            df["PCT_LACCESS_POP15"] * df["POVRATE15"] / 100
-        ).round(3)
-
-    if "PCT_SNAP16" in df.columns and "FOODINSEC_15_17" in df.columns:
-        df["snap_coverage_gap"] = (
-            df["FOODINSEC_15_17"] - df["PCT_SNAP16"]
         ).round(3)
 
     # Merge food access summary if available
@@ -199,6 +223,216 @@ def build_feature_matrix(
 
 
 # ---------------------------------------------------------------------------
+# Tool 1b: Build Census-Tract Feature Matrix (NEW2 methodology)
+# ---------------------------------------------------------------------------
+
+@tool
+def build_tract_feature_matrix(
+    state: str = "",
+) -> list[dict[str, Any]]:
+    """Build a census-tract ML feature matrix with per-capita normalization and 3D vulnerability indices.
+
+    Implements the validated NEW2 methodology:
+    - Per-capita normalization (SNAP_rate, HUNV_rate, Senior_pct, demographic %)
+    - 3D vulnerability taxonomy: Economic Hardship Index (EHI), Structural Inequality
+      Index (SII), Aging Index (AI)
+    - Clips rates to [0,1] to remove ACS estimation noise
+    - Filters tracts with Pop2010 < 50 to avoid inflated per-capita ratios
+
+    Returns one row per census tract with all engineered features ready for GBM/RF.
+
+    Args:
+        state: Two-letter state code filter (empty = all states).
+
+    Returns:
+        List of dicts — each dict is one tract with normalized features and indices.
+    """
+    conn = _get_db()
+    try:
+        if state:
+            df = pd.read_sql_query(
+                "SELECT * FROM food_access WHERE State = ?",
+                conn, params=(state.upper(),),
+            )
+        else:
+            df = pd.read_sql_query("SELECT * FROM food_access LIMIT 100000", conn)
+    except Exception as e:
+        return [{"error": f"Failed to load food_access table: {e}"}]
+    finally:
+        conn.close()
+
+    if df.empty:
+        return [{"error": "No food_access data found. Run data pipeline first."}]
+
+    # Coerce numeric columns
+    pop_col = "Pop2010" if "Pop2010" in df.columns else None
+    raw_cols = {
+        "TractSNAP": None, "TractHUNV": None, "TractSeniors": None,
+        "TractWhite": None, "TractBlack": None, "TractHispanic": None,
+    }
+    for col in list(raw_cols.keys()) + (["Pop2010"] if pop_col else []):
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+
+    if pop_col is None or "Pop2010" not in df.columns:
+        return [{"error": "food_access table missing Pop2010 column needed for per-capita normalization"}]
+
+    # Remove micro-populations (ACS estimation noise)
+    df = df[df["Pop2010"] >= 50].copy()
+    if df.empty:
+        return [{"error": "No tracts with Pop2010 >= 50"}]
+
+    pop = df["Pop2010"].replace(0, 1)  # guard against zero division
+
+    # --- Per-capita normalization (validated from NEW2 research notebook) ---
+    if "TractSNAP" in df.columns:
+        df["SNAP_rate"] = (df["TractSNAP"] / pop).clip(upper=1.0)
+    if "TractHUNV" in df.columns:
+        df["HUNV_rate"] = (df["TractHUNV"] / pop).clip(upper=1.0)
+    if "TractSeniors" in df.columns:
+        df["Senior_pct"] = (df["TractSeniors"] / pop).clip(upper=1.0)
+    if "TractWhite" in df.columns:
+        df["White_pct"] = (df["TractWhite"] / pop).clip(upper=1.0)
+    if "TractBlack" in df.columns:
+        df["Black_pct"] = (df["TractBlack"] / pop).clip(upper=1.0)
+    if "TractHispanic" in df.columns:
+        df["Hispanic_pct"] = (df["TractHispanic"] / pop).clip(upper=1.0)
+
+    # --- 3D Vulnerability Taxonomy (validated from NEW2 research notebook) ---
+    snap_r = df.get("SNAP_rate", pd.Series(0.0, index=df.index))
+    hunv_r = df.get("HUNV_rate", pd.Series(0.0, index=df.index))
+    black_p = df.get("Black_pct", pd.Series(0.0, index=df.index))
+    hisp_p = df.get("Hispanic_pct", pd.Series(0.0, index=df.index))
+    white_p = df.get("White_pct", pd.Series(0.0, index=df.index))
+    senior_p = df.get("Senior_pct", pd.Series(0.0, index=df.index))
+
+    # EHI = SNAP_rate + HUNV_rate (captures immediate economic stress + housing instability)
+    df["Economic_Hardship_Index"] = snap_r + hunv_r
+
+    # SII = Black_pct + Hispanic_pct - White_pct (captures structural/historical disadvantage)
+    df["Structural_Inequality_Index"] = black_p + hisp_p - white_p
+
+    # AI = Senior_pct (age-based vulnerability, independent dimension)
+    df["Aging_Index"] = senior_p
+
+    # Binary access indicators — keep if available
+    binary_cols = [
+        "Urban", "LILATracts_1And10", "LILATracts_halfAnd10",
+        "LILATracts_1And20", "LILATracts_Vehicle",
+    ]
+    for col in binary_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
+
+    # Select final columns
+    keep = ["CensusTract", "State", "County", "Urban", "Pop2010"]
+    keep += [c for c in [
+        "SNAP_rate", "HUNV_rate", "Senior_pct", "White_pct", "Black_pct", "Hispanic_pct",
+        "Economic_Hardship_Index", "Structural_Inequality_Index", "Aging_Index",
+    ] if c in df.columns]
+    keep += [c for c in binary_cols if c in df.columns]
+
+    result = df[[c for c in keep if c in df.columns]].to_dict(orient="records")
+    return result
+
+
+@tool
+def compute_food_insecurity_risk(
+    state: str = "",
+    top_n: int = 20,
+) -> list[dict[str, Any]]:
+    """Compute composite Food Insecurity Risk scores for census tracts using GBM predictions.
+
+    Implements the validated NEW2 composite scoring methodology:
+    1. Build tract feature matrix (per-capita + EHI/SII/AI)
+    2. Train or load GBM model (n_estimators=500, lr=0.05, max_depth=4)
+    3. Predict SNAP_rate as food insecurity proxy
+    4. MinMax-normalize EHI and Predicted_SNAP to [0,1]
+    5. Average both: Food_Insecurity_Risk = (EHI_norm + Pred_SNAP_norm) / 2
+
+    Returns tracts ranked by composite risk score (0=minimal, 1=maximum vulnerability).
+
+    Args:
+        state: Two-letter state code (empty = all states, may be slow).
+        top_n: Number of highest-risk tracts to return.
+    """
+    # Build feature matrix
+    tracts = build_tract_feature_matrix.invoke({"state": state})
+    if not tracts or "error" in tracts[0]:
+        return tracts
+
+    df = pd.DataFrame(tracts)
+
+    target = "SNAP_rate"
+    if target not in df.columns:
+        return [{"error": "SNAP_rate not available — cannot compute food insecurity risk"}]
+
+    feature_cols = [
+        c for c in [
+            "HUNV_rate", "Senior_pct", "White_pct", "Black_pct", "Hispanic_pct",
+            "Economic_Hardship_Index", "Structural_Inequality_Index", "Aging_Index",
+            "Urban", "LILATracts_1And10", "LILATracts_halfAnd10",
+            "LILATracts_1And20", "LILATracts_Vehicle",
+        ] if c in df.columns
+    ]
+
+    if not feature_cols:
+        return [{"error": "Insufficient feature columns for prediction"}]
+
+    X = df[feature_cols].fillna(0).values
+    y = df[target].values
+
+    # Train GBM (validated hyperparameters from NEW2 notebook: R²=0.9949, RMSE=0.0033)
+    model = GradientBoostingRegressor(
+        n_estimators=500, learning_rate=0.05, max_depth=4, random_state=42,
+    )
+    model.fit(X, y)
+    df["Predicted_SNAP_rate"] = model.predict(X)
+
+    # --- Composite Food Insecurity Risk Score (NEW2 formula) ---
+    scaler = MinMaxScaler()
+    norm_cols = ["Economic_Hardship_Index", "Predicted_SNAP_rate"]
+    norm_vals = scaler.fit_transform(df[norm_cols].fillna(0))
+    df["EHI_norm"] = norm_vals[:, 0]
+    df["Pred_SNAP_norm"] = norm_vals[:, 1]
+    df["Food_Insecurity_Risk"] = (df["EHI_norm"] + df["Pred_SNAP_norm"]) / 2.0
+
+    # Feature importance
+    feat_imp = sorted(
+        zip(feature_cols, model.feature_importances_.tolist()),
+        key=lambda x: x[1], reverse=True,
+    )
+
+    # Top N highest-risk tracts
+    top = df.nlargest(top_n, "Food_Insecurity_Risk")
+    result = []
+    for _, row in top.iterrows():
+        result.append({
+            "census_tract": row.get("CensusTract"),
+            "state": row.get("State"),
+            "county": row.get("County"),
+            "food_insecurity_risk": round(float(row["Food_Insecurity_Risk"]), 4),
+            "predicted_snap_rate": round(float(row["Predicted_SNAP_rate"]), 4),
+            "economic_hardship_index": round(float(row.get("Economic_Hardship_Index", 0)), 4),
+            "structural_inequality_index": round(float(row.get("Structural_Inequality_Index", 0)), 4),
+            "aging_index": round(float(row.get("Aging_Index", 0)), 4),
+            "urban": int(row.get("Urban", 0)),
+        })
+
+    return [{
+        "summary": {
+            "n_tracts_analyzed": len(df),
+            "state": state or "all",
+            "model": "GradientBoosting (n_estimators=500, lr=0.05, max_depth=4)",
+            "feature_importance": [{"feature": f, "importance": round(i, 4)} for f, i in feat_imp[:10]],
+            "score_range": [0.0, 1.0],
+            "score_interpretation": "0=minimal risk, 1=maximum vulnerability",
+        },
+        "top_tracts": result,
+    }]
+
+
+# ---------------------------------------------------------------------------
 # Tool 2: Train Risk Model
 # ---------------------------------------------------------------------------
 
@@ -206,18 +440,18 @@ def build_feature_matrix(
 def train_risk_model(
     state: str = "MO",
     model_type: str = "xgboost",
-    target_col: str = "FOODINSEC_15_17",
+    target_col: str = "FOODINSEC_21_23",
     test_size: float = 0.2,
 ) -> dict[str, Any]:
-    """Train a risk prediction model (XGBoost or Random Forest) on county data.
+    """Train a risk prediction model (XGBoost, Random Forest, GBM, SVR, or LinearRegression) on county data.
 
     Builds a feature matrix from the database, trains the model with
     cross-validation, saves the artifact to models/, and returns metrics.
 
     Args:
         state: State code for training data.
-        model_type: "xgboost" or "random_forest".
-        target_col: Column to predict (default food insecurity rate).
+        model_type: "xgboost", "random_forest", "gradient_boosting", "svr", or "linear_regression".
+        target_col: Column to predict (default FOODINSEC_21_23 — food insecurity rate 2021-23).
         test_size: Fraction held out for validation (0.0-0.5).
 
     Returns:
@@ -229,11 +463,21 @@ def train_risk_model(
 
     df = pd.DataFrame(features)
 
+    # Auto-fallback: try common food insecurity column names if preferred not found
+    _TARGET_FALLBACKS = [
+        "FOODINSEC_21_23", "FOODINSEC_18_20", "FOODINSEC_15_17", "FOODINSEC_13_15",
+    ]
     if target_col not in df.columns:
-        return {
-            "error": f"Target column '{target_col}' not found",
-            "available": [c for c in df.columns if c not in ("FIPS", "State", "County")],
-        }
+        # Try to find any food insecurity column
+        for fallback in _TARGET_FALLBACKS:
+            if fallback in df.columns:
+                target_col = fallback
+                break
+        else:
+            return {
+                "error": f"Target column not found. Tried: {_TARGET_FALLBACKS}",
+                "available": [c for c in df.columns if c not in ("FIPS", "State", "County")],
+            }
 
     # Separate features and target
     exclude = {"FIPS", "State", "County", target_col}
@@ -259,21 +503,51 @@ def train_risk_model(
             reg_lambda=1.0,
             random_state=42,
         )
+    elif model_type == "gradient_boosting":
+        # Validated county-level hyperparameters from Suyog notebook (R²=0.998, RMSE=0.099)
+        # Note: tract-level uses n=500, depth=4 in compute_food_insecurity_risk
+        model = GradientBoostingRegressor(
+            n_estimators=300,
+            learning_rate=0.05,
+            max_depth=3,
+            random_state=42,
+        )
+    elif model_type == "linear_regression":
+        # Baseline: validated R²=0.983, RMSE=0.328, MAE=0.049 (NEW1/Suyog notebooks)
+        model = LinearRegression()
+    elif model_type == "svr":
+        # SVR with RBF kernel — validated from Suyog notebook (R²=0.912, RMSE=0.746)
+        # Uses a Pipeline with StandardScaler (required for SVR)
+        model = Pipeline([
+            ("scaler", StandardScaler()),
+            ("svr", SVR(kernel="rbf", C=10, epsilon=0.1)),
+        ])
+    elif model_type == "random_forest":
+        # Validated county-level hyperparameters from NEW1/Suyog notebooks (n_estimators=200, max_depth=15)
+        model = RandomForestRegressor(
+            n_estimators=200,
+            max_depth=15,
+            random_state=42,
+            n_jobs=-1,
+        )
     else:
         model_type = "random_forest"
         model = RandomForestRegressor(
-            n_estimators=100,
-            max_depth=10,
-            min_samples_split=5,
+            n_estimators=200,
+            max_depth=15,
             random_state=42,
+            n_jobs=-1,
         )
 
+    # SVR Pipeline handles its own scaling internally — use raw X
+    X_fit = X if model_type == "svr" else X_scaled
+
     # Cross-validation
-    cv_scores = cross_val_score(model, X_scaled, y, cv=min(5, len(X) // 2), scoring="r2")
+    cv_scores = cross_val_score(model, X_fit, y, cv=min(5, len(X) // 2), scoring="r2")
 
     # Train on full data
-    model.fit(X_scaled, y)
-    y_pred = model.predict(X_scaled)
+    model.fit(X_fit, y)
+    y_pred = model.predict(X_fit)
 
     # Metrics
     residuals = y - y_pred
@@ -715,6 +989,263 @@ def web_search_risks(
 
     except Exception as e:
         return [{"error": f"Web search failed: {e}", "query": query}]
+
+
+# ---------------------------------------------------------------------------
+# Tool 9: EDA Pipeline (automated exploratory data analysis with charts)
+# ---------------------------------------------------------------------------
+
+@tool
+def run_eda_pipeline(
+    table_name: str = "food_environment",
+    state: str = "",
+    target_col: str = "",
+    top_n_features: int = 10,
+) -> dict[str, Any]:
+    """Run automated exploratory data analysis on any database table.
+
+    Performs a complete EDA pipeline: descriptive stats, missing value
+    assessment, distribution analysis, correlation matrix, and generates
+    charts for the dashboard. Works on ANY data type in the database.
+
+    Args:
+        table_name: Database table to analyze (default "food_environment").
+        state: Optional state filter (2-letter code). Empty = all data.
+        target_col: Optional target variable for focused correlation analysis.
+        top_n_features: Number of top features to include in reports.
+
+    Returns:
+        Dict with descriptive_stats, distributions, correlations, missing_values,
+        outlier_summary, charts (Plotly specs), and recommendations.
+    """
+    from src.agent.tools.chart_generator import (
+        create_bar_chart, create_chart,
+    )
+
+    conn = _get_db()
+    try:
+        # Load data
+        if state:
+            # Try state filter — fallback to full table if State column missing
+            try:
+                df = pd.read_sql_query(
+                    f"SELECT * FROM {table_name} WHERE State = ?",
+                    conn, params=(state.upper(),),
+                )
+                if df.empty:
+                    df = pd.read_sql_query(f"SELECT * FROM {table_name} LIMIT 10000", conn)
+            except Exception:
+                df = pd.read_sql_query(f"SELECT * FROM {table_name} LIMIT 10000", conn)
+        else:
+            df = pd.read_sql_query(f"SELECT * FROM {table_name} LIMIT 10000", conn)
+    except Exception as e:
+        return {"error": f"Failed to load table '{table_name}': {e}"}
+    finally:
+        conn.close()
+
+    if df.empty:
+        return {"error": f"Table '{table_name}' is empty or not found."}
+
+    # Identify column types
+    exclude_cols = {"FIPS", "State", "County", "CensusTract", "geoid"}
+    numeric_cols = [
+        c for c in df.columns
+        if c not in exclude_cols and pd.api.types.is_numeric_dtype(df[c])
+    ]
+    categorical_cols = [
+        c for c in df.columns
+        if c not in exclude_cols and not pd.api.types.is_numeric_dtype(df[c])
+    ]
+
+    result: dict[str, Any] = {
+        "table": table_name,
+        "n_rows": len(df),
+        "n_cols": len(df.columns),
+        "column_types": {
+            "numeric": len(numeric_cols),
+            "categorical": len(categorical_cols),
+            "identifier": len(exclude_cols & set(df.columns)),
+        },
+    }
+
+    # --- 1. Missing value assessment ---
+    missing = df.isnull().sum()
+    missing_pct = (missing / len(df) * 100).round(2)
+    missing_report = {
+        col: {"count": int(missing[col]), "pct": float(missing_pct[col])}
+        for col in df.columns if missing[col] > 0
+    }
+    result["missing_values"] = {
+        "total_missing": int(missing.sum()),
+        "total_pct": round(float(missing.sum()) / (len(df) * len(df.columns)) * 100, 2),
+        "columns_with_missing": len(missing_report),
+        "details": dict(sorted(missing_report.items(), key=lambda x: x[1]["pct"], reverse=True)[:20]),
+    }
+
+    # --- 2. Descriptive statistics ---
+    if numeric_cols:
+        desc = df[numeric_cols].describe().round(4)
+        result["descriptive_stats"] = {
+            col: {
+                "mean": float(desc.loc["mean", col]) if col in desc.columns else None,
+                "std": float(desc.loc["std", col]) if col in desc.columns else None,
+                "min": float(desc.loc["min", col]) if col in desc.columns else None,
+                "q25": float(desc.loc["25%", col]) if col in desc.columns else None,
+                "median": float(desc.loc["50%", col]) if col in desc.columns else None,
+                "q75": float(desc.loc["75%", col]) if col in desc.columns else None,
+                "max": float(desc.loc["max", col]) if col in desc.columns else None,
+            }
+            for col in numeric_cols[:top_n_features]
+        }
+
+    # --- 3. Distribution analysis (skewness, kurtosis) ---
+    if numeric_cols:
+        dist_info = {}
+        for col in numeric_cols[:top_n_features]:
+            series = df[col].dropna()
+            if len(series) > 2:
+                skew = float(series.skew())
+                kurt = float(series.kurtosis())
+                shape = "normal" if abs(skew) < 0.5 else ("right-skewed" if skew > 0 else "left-skewed")
+                dist_info[col] = {"skewness": round(skew, 3), "kurtosis": round(kurt, 3), "shape": shape}
+        result["distributions"] = dist_info
+
+    # --- 4. Correlation analysis ---
+    if len(numeric_cols) >= 2:
+        corr = df[numeric_cols].corr().round(4)
+
+        # Top correlations (excluding self-correlations)
+        top_corrs = []
+        for i, c1 in enumerate(numeric_cols):
+            for c2 in numeric_cols[i + 1:]:
+                r = corr.loc[c1, c2]
+                if not pd.isna(r) and abs(r) > 0.3:
+                    top_corrs.append({"var1": c1, "var2": c2, "correlation": round(float(r), 4)})
+
+        top_corrs.sort(key=lambda x: abs(x["correlation"]), reverse=True)
+        result["correlations"] = {
+            "top_pairs": top_corrs[:20],
+            "strong_positive": len([c for c in top_corrs if c["correlation"] > 0.7]),
+            "strong_negative": len([c for c in top_corrs if c["correlation"] < -0.7]),
+        }
+
+        # Target-specific correlations
+        if target_col and target_col in numeric_cols:
+            target_corrs = [
+                {"feature": col, "correlation": round(float(corr.loc[target_col, col]), 4)}
+                for col in numeric_cols if col != target_col and not pd.isna(corr.loc[target_col, col])
+            ]
+            target_corrs.sort(key=lambda x: abs(x["correlation"]), reverse=True)
+            result["target_correlations"] = target_corrs[:top_n_features]
+
+    # --- 5. Outlier detection (IQR method) ---
+    outlier_summary = {}
+    for col in numeric_cols[:top_n_features]:
+        series = df[col].dropna()
+        if len(series) > 4:
+            q1, q3 = series.quantile(0.25), series.quantile(0.75)
+            iqr = q3 - q1
+            n_outliers = int(((series < q1 - 1.5 * iqr) | (series > q3 + 1.5 * iqr)).sum())
+            if n_outliers > 0:
+                outlier_summary[col] = {"count": n_outliers, "pct": round(n_outliers / len(series) * 100, 2)}
+    result["outliers"] = outlier_summary
+
+    # --- 6. Generate EDA charts ---
+    charts: list[dict] = []
+
+    # Chart 1: Distribution histogram of target or first numeric col
+    hist_col = target_col if target_col and target_col in numeric_cols else (numeric_cols[0] if numeric_cols else None)
+    if hist_col:
+        hist_data = [{"value": float(v)} for v in df[hist_col].dropna().head(500)]
+        if hist_data:
+            chart = create_chart.invoke({
+                "chart_type": "histogram", "title": f"Distribution: {hist_col}",
+                "data_json": json.dumps(hist_data), "x_col": "value", "nbins": 30,
+            })
+            if isinstance(chart, dict) and "plotly_spec" in chart:
+                charts.append(chart)
+
+    # Chart 2: Top features by mean value (bar chart)
+    if numeric_cols:
+        means = df[numeric_cols].mean().sort_values(ascending=False).head(10)
+        mean_data = [{"feature": k, "mean_value": round(float(v), 4)} for k, v in means.items() if not pd.isna(v)]
+        if mean_data:
+            chart = create_bar_chart.invoke({
+                "title": f"Top Features by Mean Value — {table_name}",
+                "data_json": json.dumps(mean_data),
+                "x_col": "feature", "y_col": "mean_value", "horizontal": True,
+            })
+            if isinstance(chart, dict) and "plotly_spec" in chart:
+                charts.append(chart)
+
+    # Chart 3: Missing values bar chart
+    if missing_report:
+        miss_data = [
+            {"column": col, "missing_pct": info["pct"]}
+            for col, info in sorted(missing_report.items(), key=lambda x: x[1]["pct"], reverse=True)[:10]
+        ]
+        if miss_data:
+            chart = create_bar_chart.invoke({
+                "title": "Missing Data by Column (%)",
+                "data_json": json.dumps(miss_data),
+                "x_col": "column", "y_col": "missing_pct", "horizontal": True,
+            })
+            if isinstance(chart, dict) and "plotly_spec" in chart:
+                charts.append(chart)
+
+    # Chart 4: Top correlations with target (if specified)
+    if target_col and "target_correlations" in result:
+        corr_data = [
+            {"feature": c["feature"], "correlation": c["correlation"]}
+            for c in result["target_correlations"][:10]
+        ]
+        if corr_data:
+            chart = create_bar_chart.invoke({
+                "title": f"Top Correlations with {target_col}",
+                "data_json": json.dumps(corr_data),
+                "x_col": "feature", "y_col": "correlation", "horizontal": True,
+            })
+            if isinstance(chart, dict) and "plotly_spec" in chart:
+                charts.append(chart)
+
+    # Chart 5: Box plot of target by category (if applicable)
+    if target_col and target_col in numeric_cols and categorical_cols:
+        cat_col = categorical_cols[0]
+        top_cats = df[cat_col].value_counts().head(8).index.tolist()
+        box_data = [
+            {cat_col: str(r[cat_col]), target_col: float(r[target_col])}
+            for _, r in df[df[cat_col].isin(top_cats)].head(500).iterrows()
+            if pd.notna(r[target_col])
+        ]
+        if box_data:
+            chart = create_chart.invoke({
+                "chart_type": "box", "title": f"{target_col} by {cat_col}",
+                "data_json": json.dumps(box_data),
+                "x_col": cat_col, "y_col": target_col,
+            })
+            if isinstance(chart, dict) and "plotly_spec" in chart:
+                charts.append(chart)
+
+    result["charts"] = charts
+    result["n_charts"] = len(charts)
+
+    # --- 7. Recommendations ---
+    recs = []
+    if result["missing_values"]["total_pct"] > 20:
+        recs.append("High missing data rate — consider dropping columns with >90% missing before modeling.")
+    if outlier_summary:
+        recs.append(f"{len(outlier_summary)} features have outliers — use robust scalers or clip extreme values.")
+    strong_pos = result.get("correlations", {}).get("strong_positive", 0)
+    if strong_pos > 3:
+        recs.append(f"{strong_pos} highly correlated feature pairs — consider dimensionality reduction or feature selection.")
+    skewed = [c for c, d in result.get("distributions", {}).items() if d.get("shape") != "normal"]
+    if len(skewed) > len(numeric_cols) * 0.5:
+        recs.append("Most features are skewed — apply log transform or use tree-based models (Random Forest, GBM).")
+    if not recs:
+        recs.append("Data quality looks good — proceed with modeling.")
+    result["recommendations"] = recs
+
+    return result
 
 
 # ---------------------------------------------------------------------------

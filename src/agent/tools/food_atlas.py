@@ -100,8 +100,15 @@ def query_food_atlas(
         query += " AND State = ?"
         params.append(state.upper())
     if county:
-        query += " AND County LIKE ?"
-        params.append(f"%{county}%")
+        # Support comma-separated county names (e.g. "Dunklin,Pemiscot,Scott")
+        county_names = [c.strip() for c in county.split(",") if c.strip()]
+        if len(county_names) == 1:
+            query += " AND County LIKE ?"
+            params.append(f"%{county_names[0]}%")
+        else:
+            placeholders = " OR ".join("County LIKE ?" for _ in county_names)
+            query += f" AND ({placeholders})"
+            params.extend(f"%{c}%" for c in county_names)
 
     query += f" LIMIT {limit}"
 
@@ -143,8 +150,15 @@ def query_food_access(
         query += " AND State = ?"
         params.append(state.upper())
     if county:
-        query += " AND County LIKE ?"
-        params.append(f"%{county}%")
+        # Support comma-separated county names (e.g. "Dunklin,Pemiscot,Scott")
+        county_names = [c.strip() for c in county.split(",") if c.strip()]
+        if len(county_names) == 1:
+            query += " AND County LIKE ?"
+            params.append(f"%{county_names[0]}%")
+        else:
+            placeholders = " OR ".join("County LIKE ?" for _ in county_names)
+            query += f" AND ({placeholders})"
+            params.extend(f"%{c}%" for c in county_names)
     if urban_rural:
         query += " AND Urban = ?"
         params.append("1" if urban_rural.lower() == "urban" else "0")

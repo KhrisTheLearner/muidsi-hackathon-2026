@@ -2,7 +2,7 @@
 
 This is the core orchestrator. It defines the graph:
 
-    START -> router -> [planner | tool_caller] <-> tools -> synthesizer -> END
+    START -> router -> [planner | tool_caller] <-> tools -> chart_validator -> synthesizer -> END
 
 The router (pure Python, no LLM) fast-tracks simple queries directly to
 the tool_caller, skipping the planner entirely. Complex queries still go
@@ -23,6 +23,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import ToolNode
 
+from src.agent.nodes.chart_validator import validate_chart_messages
 from src.agent.nodes.planner import planner_node
 from src.agent.nodes.synthesizer import synthesizer_node
 from src.agent.nodes.tool_executor import ALL_TOOLS, tool_caller_node
@@ -144,7 +145,30 @@ def _should_continue_after_action(state: AgriFlowState) -> str:
     current_step = state.get("current_step", 0)
     if current_step + 1 < len(plan):
         return "advance_step"
-    return "synthesize"
+    return "chart_validator"
+
+
+def _chart_validator_node(state: AgriFlowState) -> dict:
+    """Validate and fix all chart Plotly specs in the message history.
+
+    Catches swapped axes, raw column names, empty traces, bad FIPS codes,
+    reversed lat/lon, and missing labels — fixing them before the frontend
+    ever sees them.
+    """
+    messages = state.get("messages", [])
+    fixed_messages, fix_log = validate_chart_messages(messages)
+
+    updates: dict = {}
+    if fix_log:
+        updates["messages"] = fixed_messages
+        updates["reasoning_trace"] = state.get("reasoning_trace", []) + [
+            f"Chart validator: applied {len(fix_log)} fix(es) — " + "; ".join(fix_log[:5])
+        ]
+    else:
+        updates["reasoning_trace"] = state.get("reasoning_trace", []) + [
+            "Chart validator: all charts passed validation"
+        ]
+    return updates
 
 
 def _route_after_advance(state: AgriFlowState) -> str:
@@ -162,10 +186,25 @@ def _route_after_advance(state: AgriFlowState) -> str:
 # Direct viz execution — bypasses LLM, calls chart tools programmatically
 # ---------------------------------------------------------------------------
 
-def _extract_data_from_messages(messages: list) -> list[dict]:
-    """Extract data rows from ToolMessage results in the conversation."""
-    for msg in reversed(messages):
+def _extract_data_from_messages(messages: list, step_text: str = "") -> list[dict]:
+    """Extract the best data rows from ToolMessage results for visualization.
+
+    Collects ALL tool result datasets, then picks the one most relevant to
+    the viz step being executed. Prefers datasets with:
+    1. Columns that match keywords in the step text
+    2. More columns (richer data)
+    3. County/geographic columns (for maps)
+    """
+    datasets: list[tuple[str, list[dict]]] = []  # (tool_name, rows)
+
+    for msg in messages:
         if not isinstance(msg, ToolMessage):
+            continue
+        # Skip chart tool results (they contain plotly specs, not data)
+        if hasattr(msg, "name") and msg.name in (
+            "create_bar_chart", "create_line_chart", "create_scatter_map",
+            "create_risk_heatmap", "create_choropleth_map", "create_chart",
+        ):
             continue
         try:
             content = msg.content
@@ -173,17 +212,71 @@ def _extract_data_from_messages(messages: list) -> list[dict]:
                 data = json.loads(content)
             else:
                 data = content
-            # Check for common result formats
+            rows = None
             if isinstance(data, list) and data and isinstance(data[0], dict):
-                return data
-            if isinstance(data, dict):
-                # Some tools return {"results": [...]}
+                rows = data
+            elif isinstance(data, dict):
                 for key in ("results", "data", "rows"):
-                    if key in data and isinstance(data[key], list):
-                        return data[key]
+                    if key in data and isinstance(data[key], list) and data[key]:
+                        if isinstance(data[key][0], dict):
+                            rows = data[key]
+                            break
+            if rows:
+                tool_name = getattr(msg, "name", "unknown")
+                datasets.append((tool_name, rows))
         except (json.JSONDecodeError, TypeError):
             continue
-    return []
+
+    if not datasets:
+        return []
+
+    # If only one dataset, return it
+    if len(datasets) == 1:
+        return datasets[0][1]
+
+    # Score each dataset for relevance to the step text
+    step_lower = step_text.lower()
+    best_score = -1
+    best_rows = datasets[-1][1]  # default: most recent
+
+    for tool_name, rows in datasets:
+        score = 0
+        cols = {k.lower() for k in rows[0].keys()} if rows else set()
+
+        # Prefer datasets with county/geographic info (needed for maps)
+        if cols & {"county", "county_name", "name", "fips", "fipscode", "fips_code"}:
+            score += 10
+
+        # Prefer datasets with risk/insecurity columns (often the target for viz)
+        if cols & {"foodinsec_13_15", "food_insecurity", "risk_score", "povrate15",
+                   "poverty_rate", "predicted_risk", "composite_risk"}:
+            score += 8
+
+        # Prefer datasets with more columns (richer)
+        score += min(len(cols), 10)
+
+        # Prefer datasets with more rows (more data points)
+        score += min(len(rows), 5)
+
+        # Keyword matching: if step mentions "insecurity" and data has it, boost
+        for kw in ["insecur", "poverty", "risk", "snap", "desert", "yield",
+                    "corn", "weather", "disaster", "census", "demograph"]:
+            if kw in step_lower:
+                if any(kw in c for c in cols):
+                    score += 5
+                if kw in tool_name.lower():
+                    score += 3
+
+        # Penalize datasets that are mostly time-series without county data
+        # (e.g., NASS yearly data that just has year + Value)
+        if cols == {"year", "value"} or (len(cols) <= 3 and "year" in cols):
+            score -= 5
+
+        if score > best_score:
+            best_score = score
+            best_rows = rows
+
+    return best_rows
 
 
 def _detect_chart_type(step_text: str, query: str, has_fips: bool = False, has_latlon: bool = False) -> str:
@@ -218,19 +311,76 @@ def _detect_columns(rows: list[dict], chart_type: str, step_text: str) -> dict:
     lat_cols = []
     lon_cols = []
     fips_cols = []
+    skip_cols = set()  # Columns that should NOT be used as value axes
+
     for c in cols:
         val = rows[0].get(c)
         cl = c.lower()
         if cl in ("lat", "latitude"):
             lat_cols.append(c)
+            skip_cols.add(c)
         elif cl in ("lon", "lng", "longitude"):
             lon_cols.append(c)
+            skip_cols.add(c)
         elif cl in ("fips", "fipscode", "fips_code", "county_fips", "geoid"):
             fips_cols.append(c)
+            skip_cols.add(c)
+        elif cl in ("year", "state_fips", "state_code", "id", "index"):
+            # These are identifiers, not values — exclude from value columns
+            skip_cols.add(c)
+            if isinstance(val, (int, float)):
+                pass  # Don't add to num_cols
+            else:
+                str_cols.append(c)
         elif isinstance(val, (int, float)):
             num_cols.append(c)
         else:
             str_cols.append(c)
+
+    # Rank numeric columns by relevance to the step text
+    def _rank_num_col(col_name: str) -> int:
+        """Higher = more relevant as a chart value column."""
+        cl = col_name.lower()
+        score = 0
+        step_lower = step_text.lower()
+
+        # Direct mention in step text
+        if cl in step_lower:
+            score += 20
+
+        # Priority columns for food security analysis
+        priority_words = {
+            "insec": 15, "insecur": 15, "foodinsec": 15,
+            "risk": 14, "poverty": 13, "pov": 13,
+            "score": 12, "rate": 11, "snap": 10, "desert": 10,
+            "access": 9, "vulnerab": 9, "predict": 8, "compos": 8,
+            "importance": 7, "shap": 7, "anomal": 7,
+        }
+        for word, pts in priority_words.items():
+            if word in cl:
+                score += pts
+                break
+
+        # Keyword match between step and column
+        for kw in ["insec", "insecur", "risk", "poverty", "pov", "yield", "corn", "food", "vulnerab"]:
+            if kw in step_lower and kw in cl:
+                score += 10
+                break
+
+        return score
+
+    # Deprioritize columns with no variance (same value for all rows)
+    def _has_variance(col_name: str) -> bool:
+        vals = {r.get(col_name) for r in rows[:20] if r.get(col_name) is not None}
+        return len(vals) > 1
+
+    def _final_rank(col_name: str) -> int:
+        score = _rank_num_col(col_name)
+        if not _has_variance(col_name):
+            score -= 20  # Heavy penalty for uniform columns (e.g., state-level aggregates)
+        return score
+
+    num_cols.sort(key=_final_rank, reverse=True)
 
     if chart_type == "choropleth":
         fips = fips_cols[0] if fips_cols else None
@@ -246,9 +396,16 @@ def _detect_columns(rows: list[dict], chart_type: str, step_text: str) -> dict:
         return {"lat_col": lat, "lon_col": lon, "color_col": color or "", "text_col": text or ""}
 
     if chart_type == "heatmap":
+        # For heatmap, we need two categorical axes and a numeric z value
         x = str_cols[0] if str_cols else cols[0]
-        y = str_cols[1] if len(str_cols) > 1 else (num_cols[0] if num_cols else cols[1])
+        y = str_cols[1] if len(str_cols) > 1 else cols[1] if len(cols) > 1 else cols[0]
         z = num_cols[0] if num_cols else cols[-1]
+        # Avoid using the same column for x and y
+        if x == y and len(cols) > 2:
+            for c in cols:
+                if c != x and c != z and c not in skip_cols:
+                    y = c
+                    break
         return {"x_col": x, "y_col": y, "z_col": z}
 
     if chart_type == "line":
@@ -257,17 +414,17 @@ def _detect_columns(rows: list[dict], chart_type: str, step_text: str) -> dict:
         return {"x_col": x, "y_cols": y}
 
     # bar chart (default)
-    x = str_cols[0] if str_cols else cols[0]
-
-    # Try to pick the most relevant numeric column based on step text
-    best_y = num_cols[0] if num_cols else cols[1] if len(cols) > 1 else cols[0]
-    step_lower = step_text.lower()
-    for nc in num_cols:
-        if nc.lower() in step_lower or any(w in nc.lower() for w in ["insecur", "rate", "pov", "risk", "score"]):
-            best_y = nc
+    # Pick the best label column (county/name preferred)
+    label_col = str_cols[0] if str_cols else cols[0]
+    for c in str_cols:
+        if c.lower() in ("county", "county_name", "name", "community"):
+            label_col = c
             break
 
-    return {"x_col": x, "y_col": best_y}
+    # Best numeric column is already sorted by relevance
+    best_y = num_cols[0] if num_cols else cols[1] if len(cols) > 1 else cols[0]
+
+    return {"x_col": label_col, "y_col": best_y}
 
 
 def _direct_viz_node(state: AgriFlowState) -> dict:
@@ -287,8 +444,36 @@ def _direct_viz_node(state: AgriFlowState) -> dict:
             query = msg.content
             break
 
-    # Extract data from previous tool results
-    rows = _extract_data_from_messages(state["messages"])
+    # Extract data from previous tool results — picks the most relevant dataset
+    rows = _extract_data_from_messages(state["messages"], step_text=step_text + " " + query)
+    if not rows:
+        # Fallback: query food atlas directly to get data for the chart
+        try:
+            from src.agent.tools.food_atlas import query_food_atlas
+            # Extract state from query (default to MO)
+            state_match = re.search(r"\b(Missouri|MO|Illinois|IL|Kansas|KS|Iowa|IA)\b", query, re.I)
+            state_val = "MO"
+            if state_match:
+                abbrevs = {"missouri": "MO", "illinois": "IL", "kansas": "KS", "iowa": "IA"}
+                state_val = abbrevs.get(state_match.group(1).lower(), state_match.group(1).upper())
+
+            fallback_result = query_food_atlas.invoke({
+                "state": state_val,
+                "columns": "FIPS,County,FOODINSEC_21_23,POVRATE21,PCT_SNAP17,PCT_LACCESS_POP15",
+                "limit": 200,
+            })
+            if isinstance(fallback_result, list) and fallback_result:
+                rows = fallback_result
+                # Add fallback data as a ToolMessage for downstream use
+                fallback_msg = ToolMessage(
+                    content=json.dumps(rows),
+                    name="query_food_atlas",
+                    tool_call_id=f"direct_viz_fallback_{step}",
+                )
+                state["messages"].append(fallback_msg)
+        except Exception:
+            pass
+
     if not rows:
         return {
             "reasoning_trace": state.get("reasoning_trace", []) + [
@@ -326,17 +511,32 @@ def _direct_viz_node(state: AgriFlowState) -> dict:
     col_args = _detect_columns(rows, chart_type, step_text)
 
     # Sort and limit for readability
-    if chart_type == "bar" and "y_col" in col_args:
-        y_col = col_args["y_col"]
+    sort_col = col_args.get("y_col") or col_args.get("value_col")
+    if chart_type in ("bar",) and sort_col:
         try:
-            rows = sorted(rows, key=lambda r: float(r.get(y_col, 0)), reverse=True)[:10]
+            rows = sorted(rows, key=lambda r: float(r.get(sort_col, 0)), reverse=True)[:15]
         except (ValueError, TypeError):
-            rows = rows[:10]
+            rows = rows[:15]
+    elif chart_type == "choropleth":
+        pass  # Keep all rows for geographic maps
 
-    title = step_text.replace("[viz]", "").strip()
-    if not title or title == query:
-        y_label = col_args.get("y_col", col_args.get("color_col", ""))
-        title = f"Top Counties by {y_label}" if y_label else "AgriFlow Visualization"
+    # Generate a human-readable title
+    from src.agent.nodes.chart_validator import _humanize_column
+    raw_title = step_text.replace("[viz]", "").strip()
+    y_label = col_args.get("y_col", col_args.get("value_col", col_args.get("color_col", "")))
+    y_human = _humanize_column(y_label) if y_label else ""
+
+    if not raw_title or raw_title == query:
+        title = f"Top Counties by {y_human}" if y_human else "AgriFlow Visualization"
+    else:
+        # Check if raw title has useful info beyond just "create bar chart of..."
+        generic_prefixes = ["create ", "show ", "generate ", "make ", "build "]
+        cleaned = raw_title
+        for prefix in generic_prefixes:
+            if cleaned.lower().startswith(prefix):
+                cleaned = cleaned[len(prefix):]
+        # Capitalize first letter
+        title = cleaned[0].upper() + cleaned[1:] if cleaned else f"Top Counties by {y_human}"
 
     data_json = json.dumps(rows)
 
@@ -435,6 +635,7 @@ def create_agent() -> StateGraph:
     graph.add_node("planner", planner_node)
     graph.add_node("tool_caller", tool_caller_node)
     graph.add_node("tools", ToolNode(ALL_TOOLS))
+    graph.add_node("chart_validator", _chart_validator_node)
     graph.add_node("synthesizer", synthesizer_node)
     graph.add_node("finalizer", _finalizer_node)
     graph.add_node("advance_step", _advance_step_node)
@@ -457,7 +658,7 @@ def create_agent() -> StateGraph:
         _should_continue,
         {
             "tools": "tools",
-            "synthesize": "synthesizer",
+            "synthesize": "chart_validator",
             "done": "finalizer",
             "advance_step": "advance_step",
         },
@@ -470,14 +671,15 @@ def create_agent() -> StateGraph:
         {"direct_viz": "direct_viz", "tool_caller": "tool_caller"},
     )
 
-    # direct_viz -> check if more steps or synthesize
+    # direct_viz -> check if more steps or validate charts
     graph.add_conditional_edges(
         "direct_viz",
         _should_continue_after_action,
-        {"advance_step": "advance_step", "synthesize": "synthesizer"},
+        {"advance_step": "advance_step", "chart_validator": "chart_validator"},
     )
 
     graph.add_edge("tools", "tool_caller")
+    graph.add_edge("chart_validator", "synthesizer")
     graph.add_edge("synthesizer", END)
     graph.add_edge("finalizer", END)
 

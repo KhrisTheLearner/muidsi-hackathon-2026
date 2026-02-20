@@ -4,3 +4,6 @@ model_name = "priv-claude-haiku-4-5-20251001"
 enabled = true
 description = "Fast data fetcher for USDA, Census, FEMA, and weather APIs"
 system_prompt_file = "agriflow-data.md"
+
+[mcp_tools]
+agriflow-sqlite = null   # Read access to USDA, Census, FEMA, and agricultural datasets

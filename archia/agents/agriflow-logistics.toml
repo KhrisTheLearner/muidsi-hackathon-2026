@@ -4,3 +4,6 @@ model_name = "priv-claude-haiku-4-5-20251001"
 enabled = true
 description = "Delivery route optimization and scheduling for Missouri food distribution"
 system_prompt_file = "agriflow-logistics.md"
+
+[mcp_tools]
+agriflow-routes = null   # TSP routing, distance calculation, route maps, delivery scheduling

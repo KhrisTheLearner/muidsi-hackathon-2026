@@ -12,6 +12,8 @@ from mcp.server.fastmcp import FastMCP
 
 from src.agent.tools.chart_generator import (
     create_bar_chart as _bar,
+    create_choropleth_map as _choropleth,
+    create_chart as _chart,
     create_line_chart as _line,
     create_risk_heatmap as _heatmap,
     create_scatter_map as _scatter,
@@ -50,6 +52,22 @@ def create_risk_heatmap(title: str, data_json: str, x_col: str, y_col: str, z_co
     """Create a risk assessment heatmap."""
     return _heatmap.invoke({"title": title, "data_json": data_json,
                             "x_col": x_col, "y_col": y_col, "z_col": z_col})
+
+
+@mcp.tool()
+def create_choropleth_map(title: str, data_json: str, fips_col: str, value_col: str,
+                          text_col: str = ""):
+    """Create a choropleth county-level map colored by a numeric value (e.g. food insecurity rate)."""
+    return _choropleth.invoke({"title": title, "data_json": data_json, "fips_col": fips_col,
+                               "value_col": value_col, "text_col": text_col})
+
+
+@mcp.tool()
+def create_chart(chart_type: str, title: str, data_json: str,
+                 x_col: str = "", y_col: str = "", color_col: str = ""):
+    """Create any Plotly chart by type (scatter, pie, histogram, box, violin, area, funnel, etc.)."""
+    return _chart.invoke({"chart_type": chart_type, "title": title, "data_json": data_json,
+                          "x_col": x_col, "y_col": y_col, "color_col": color_col})
 
 
 if __name__ == "__main__":

@@ -29,6 +29,9 @@ load_dotenv()
 
 from src.agent.graph import create_agent  # noqa: E402
 from src.agent.tools.evaluator import evaluate_response, get_evaluation_summary  # noqa: E402
+from src.agent.tools.route_optimizer import (  # noqa: E402
+    optimize_delivery_route, create_route_map, LOCATIONS,
+)
 
 app = FastAPI(
     title="AgriFlow API",
@@ -88,6 +91,23 @@ _ANALYTICS_TOOLS = {"run_analytics_pipeline"}
 
 # Session-scoped analytics report store
 _analytics_store: dict[str, dict] = {}
+
+
+class RouteRequest(BaseModel):
+    origin: str
+    destinations: str  # comma-separated location names
+
+
+class RouteResponse(BaseModel):
+    optimized_route: list[str]
+    total_distance_miles: float
+    est_total_drive_minutes: int
+    total_stops: int
+    legs: list[dict]
+    method: str
+    plotly_spec: dict | None = None
+    directions: list[dict] = []
+    error: str | None = None
 
 
 class QueryRequest(BaseModel):
@@ -268,7 +288,17 @@ async def query_agent_stream(request: QueryRequest):
             # astream() state merging breaks in FastAPI's async generator context.
             yield f"data: {json.dumps({'type': 'status', 'message': 'Processing query...'})}\n\n"
 
-            result = await asyncio.to_thread(agent.invoke, initial_state)
+            # Run agent in background thread + send keepalive pings every 5s
+            # so the SSE connection doesn't time out on long queries.
+            loop = asyncio.get_event_loop()
+            agent_task = loop.run_in_executor(None, agent.invoke, initial_state)
+            while True:
+                done, _ = await asyncio.wait({agent_task}, timeout=5)
+                if done:
+                    result = agent_task.result()
+                    break
+                # Send a keepalive comment (SSE comments start with ':')
+                yield ": keepalive\n\n"
 
             # Extract tool calls
             tool_calls = []
@@ -331,6 +361,51 @@ async def eval_summary():
         return {"error": str(e), "total": 0}
 
 
+@app.post("/api/route")
+async def route_direct(request: RouteRequest):
+    """Direct route endpoint — bypasses LangGraph for ~3s response.
+    Returns ORS road routing with haversine fallback."""
+    _empty = {"optimized_route": [], "total_distance_miles": 0,
+              "est_total_drive_minutes": 0, "total_stops": 0,
+              "legs": [], "method": "", "directions": [], "plotly_spec": None}
+
+    origin = request.origin.strip()
+    destinations = request.destinations.strip()
+
+    if not origin or not destinations:
+        return {**_empty, "error": "Origin and destinations required."}
+
+    unknown = [loc for loc in [origin] + [d.strip() for d in destinations.split(",")]
+               if loc not in LOCATIONS]
+    if unknown:
+        return {**_empty, "error": f"Unknown locations: {unknown}"}
+
+    loop = asyncio.get_event_loop()
+    route_data = await loop.run_in_executor(
+        None,
+        lambda: optimize_delivery_route.invoke({"origin": origin, "destinations": destinations})
+    )
+    if "error" in route_data:
+        return {**_empty, "error": route_data["error"]}
+
+    map_data = await loop.run_in_executor(
+        None,
+        lambda: create_route_map.invoke({"route_json": json.dumps(route_data)})
+    )
+
+    return {
+        "optimized_route": route_data["optimized_route"],
+        "total_distance_miles": route_data["total_distance_miles"],
+        "est_total_drive_minutes": route_data["est_total_drive_minutes"],
+        "total_stops": route_data["total_stops"],
+        "legs": route_data["legs"],
+        "method": route_data["method"],
+        "plotly_spec": map_data.get("plotly_spec"),
+        "directions": map_data.get("ors_steps", []),
+        "error": None,
+    }
+
+
 @app.get("/api/health")
 async def health():
     """Health check endpoint."""
@@ -339,6 +414,7 @@ async def health():
         "model": os.getenv("DEFAULT_MODEL", "priv-claude-sonnet-4-5-20250929"),
         "archia_configured": bool(os.getenv("ARCHIA_TOKEN")),
         "nass_configured": bool(os.getenv("NASS_API_KEY")),
+        "ors_configured": bool(os.getenv("OPENROUTESERVICE_API_KEY")),
         "tools_available": {
             "data": ["query_food_atlas", "query_food_access", "query_nass",
                      "query_weather", "query_fema_disasters", "query_census_acs",
