@@ -1,0 +1,17 @@
+# AgriFlow SQLite MCP Tool
+# Provides read-only access to the AgriFlow database (USDA, Census, etc.)
+
+identifier = "agriflow-sqlite"
+name = "AgriFlow SQLite Database"
+description = "Read-only SQLite access to USDA Food Environment Atlas, Food Access Research Atlas, and agricultural datasets"
+provider = "AgriFlow"
+version = "1.0.0"
+type = "mcp"
+
+[local]
+cmd = "python"
+args = ["-m", "src.mcp_servers.sqlite_server"]
+timeout_secs = 30
+
+[local.env]
+DB_PATH = "${DB_PATH}"

@@ -1,0 +1,8 @@
+name = "agriflow-ingest"
+model_name = "priv-claude-haiku-4-5-20251001"
+enabled = true
+description = "Data ingestion agent: fetches, profiles, cleans, and loads external datasets into agriflow.db. Runs EDA on new data sources and integrates them into the pipeline."
+system_prompt_file = "agriflow-ingest.md"
+
+[mcp_tools]
+agriflow-sqlite = null   # Read/write access for loading new datasets into agriflow.db

@@ -55,3 +55,25 @@ frontend/.env
 
 # Logs
 *.log
+server_log.txt
+
+# Archia website documentation (local copy, not part of project)
+archia/Archia Website Documentation/
+"archia/Archia Website Documentation.whtt"
+archia/backblue.gif
+archia/fade.gif
+archia/index.html
+
+# Evaluation logs (runtime-generated, not source code)
+data/evaluations.jsonl
+
+# Windows device files
+NUL
+
+# Cached ML model artifacts (keep models/ dir via .gitkeep, not artifacts)
+models/*.pkl
+models/*.joblib
+models/*.json
+
+# Claude Code local settings (machine-specific)
+.claude/settings.local.json
