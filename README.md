@@ -6,6 +6,12 @@
 
 > Ask AgriFlow anything about Missouri food supply chains — it reasons across crop data, census demographics, disaster history, weather, and trained ML models to give actionable answers with charts, maps, and delivery routes.
 
+## 🚀 Live Demo
+
+**[agriflow-team02.netlify.app](https://agriflow-team02.netlify.app)** — The AgriFlow demo is LIVE.
+
+Frontend hosted on Netlify. Backend (FastAPI + LangGraph + 32 tools) running on Hugging Face Spaces with 16 GB RAM.
+
 ---
 
 ## What It Does
